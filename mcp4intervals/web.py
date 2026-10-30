@@ -73,6 +73,16 @@ PAGE = """<!doctype html>
   .model-guide th, .model-guide td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; word-break: break-all; }
   .model-guide th { background: #f3f4f6; font-weight: 600; }
   .model-guide code { font-size: 11px; background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+  #modalOverlay { display: none; position: fixed; inset: 0; background: rgba(17,24,39,0.55); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+  .modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 440px; width: 100%; text-align: center; box-sizing: border-box; }
+  .modal .icon { font-size: 42px; }
+  .modal h2 { margin: 10px 0 6px; font-size: 19px; }
+  .modal p { color: #4b5563; font-size: 14px; line-height: 1.7; margin: 0; }
+  .modal button { margin-top: 16px; width: 100%; }
+  .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 13px; }
+  .dash-grid .k { color: #6b7280; }
+  .dash-grid .v { color: #111827; font-weight: 600; }
+  @media (max-width: 640px) { .dash-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -109,6 +119,14 @@ PAGE = """<!doctype html>
     <li><b>API Key</b>：进入 <a href="https://intervals.icu/settings" target="_blank" rel="noopener">Settings</a>，页面底部 <b>Developer Settings</b> 里生成并复制。</li>
     <li>把这两项填进下方表单，保存即可。</li>
   </ol>
+</div>
+
+<div id="dashboard" class="card" style="display:none;border-color:#10b981;background:#f0fdf4">
+  <h2 style="margin-top:0">我的配置（Dashboard）</h2>
+  <div id="dashBody" class="dash-grid"></div>
+  <div style="margin-top:12px">
+    <button class="secondary" onclick="document.getElementById('formTitle').scrollIntoView({behavior:'smooth'})">↓ 编辑设置</button>
+  </div>
 </div>
 
 <div class="card">
@@ -237,6 +255,15 @@ PAGE = """<!doctype html>
   <div id="msg"></div>
 </div>
 
+<div id="modalOverlay">
+  <div class="modal">
+    <div class="icon">✅</div>
+    <h2 id="modalTitle">配置已保存</h2>
+    <p id="modalBody"></p>
+    <button onclick="closeModal()">确定</button>
+  </div>
+</div>
+
 <script>
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function el(id) { return document.getElementById(id); }
@@ -336,6 +363,28 @@ var editingId = '';
 var bindQrcode = '';
 var bindDone = false;
 
+function showModal(title, bodyHtml) {
+  el('modalTitle').textContent = title;
+  el('modalBody').innerHTML = bodyHtml;
+  el('modalOverlay').style.display = 'flex';
+}
+function closeModal() {
+  el('modalOverlay').style.display = 'none';
+}
+function renderDashboard(u) {
+  var h = '';
+  function row(k, v, safe) { h += '<div class="k">' + esc(k) + '</div><div class="v">' + (safe ? v : esc(v)) + '</div>'; }
+  row('运动员 ID', u.athlete_id);
+  row('微信绑定', u.wechat_bound ? '✅ 已绑定' : '❌ 未绑定', true);
+  row('时区', u.timezone);
+  row('每日发送时间', u.send_at);
+  row('报告类型', u.report_mode === 'ai' ? 'AI 分析（调用模型）' : '规则摘要（不调用模型）', true);
+  row('Intervals API Key', u.intervals_api_key_set ? '✅ 已设置' : '⚠️ 未设置', true);
+  if (u.model_name) { row('模型', u.model_name + (u.model_api_key_set ? '' : '（未设 Key）')); }
+  else { row('模型', '未配置', true); }
+  el('dashBody').innerHTML = h;
+}
+
 function resetForm() {
   el('formTitle').textContent = '开通 / 修改我的配置';
   el('athlete_id').value = '';
@@ -358,6 +407,7 @@ function resetForm() {
   bindDone = false;
   el('bindBox').style.display = 'none';
   el('bindState').textContent = '微信状态：未绑定';
+  el('dashboard').style.display = 'none';
   showMsg('', false);
 }
 
@@ -408,6 +458,9 @@ function loadMine() {
       el('athlete_id').disabled = true;
       editingId = res.d.athlete_id;
       el('bindState').textContent = '微信状态：' + (res.d.wechat_bound ? '已绑定' : '未绑定');
+      renderDashboard(res.d);
+      el('dashboard').style.display = 'block';
+      el('dashboard').scrollIntoView({ behavior: 'smooth' });
       showMsg('已载入 ' + res.d.athlete_id + '，修改后点保存', true);
     })
     .catch(function(){ showMsg('请求失败', false); });
@@ -487,7 +540,13 @@ function save() {
   fetch('api/user', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
     .then(function(res){
-      if (res.ok) { showMsg('已保存 ' + res.d.athlete_id, true); resetForm(); }
+      if (res.ok) {
+        var wasEditing = !!editingId;
+        var bodyHtml = '运动员 ID：<b>' + esc(res.d.athlete_id) + '</b>';
+        if (!wasEditing) { bodyHtml += '<br><br>请<b>用微信给新绑定的机器人发一条消息</b>，之后每天按你设置的时间自动推送日报。'; }
+        showModal(wasEditing ? '✅ 配置已更新' : '✅ 开通成功', bodyHtml);
+        resetForm();
+      }
       else { showMsg(res.d.message || '保存失败', false); }
     })
     .catch(function(){ showMsg('请求失败', false); });
