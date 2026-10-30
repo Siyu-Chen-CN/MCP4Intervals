@@ -65,6 +65,24 @@ Docker 内的 localhost 指容器本身；访问树莓派上的另一容器时�
 AI 模式会把归一化的训练摘要（含指标、活动名称及日历名称）发送至配置的模型服务，可能产生该服务的调用费用。
 不发送 Intervals API Key、微信机器人凭据或原始活动轨迹。空正文、截断、错误格式和超长输出都会报错，不会悄悄降级成规则摘要推送。
 
+### 常用厂商速查（OpenAI 兼容格式）
+
+网页自助开通里选「模型厂商」会自动填好 Base URL 和模型名；单用户 `.env` 模式照下表手动填。
+
+| 厂商 | `LLM_BASE_URL` | 模型名示例 | API Key 获取 |
+|---|---|---|---|
+| DeepSeek | `https://api.deepseek.com` | `deepseek-flash`、`deepseek-v4-pro` | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) |
+| OpenAI（ChatGPT） | `https://api.openai.com/v1` | `gpt-6-astra`、`gpt-6.1-sol`、`gpt-5.5`、`gpt-5.4-mini` 等 | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| 智谱 AI（GLM） | `https://open.bigmodel.cn/api/paas/v4` | `glm-5.1`、`glm-5`、`glm-4-plus` 等 | [open.bigmodel.cn/usercenter/apikeys](https://open.bigmodel.cn/usercenter/apikeys) |
+| 月之暗面（Kimi） | `https://api.moonshot.cn/v1` | `kimi-k3.1-pro`、`kimi-k3` | [platform.kimi.com](https://platform.kimi.com/console/api-keys) |
+
+> 推荐 **DeepSeek**（便宜）或 **OpenAI**（更强）。按每天 1 份、约 3000 输入 + 1500 输出 token 粗略估算（1 美元 ≈ 7.2 元）：
+>
+> - DeepSeek：`deepseek-flash` ≈ ¥0.01/天，`deepseek-v4-pro` ≈ ¥0.04/天
+> - OpenAI：`GPT-6 Luna` ≈ ¥0.01/天，`GPT-6.1 Sol` ≈ ¥0.15/天
+>
+> 实际以各平台计费为准。
+
 ## 命令
 
 所有命令均使用 `python -m mcp4intervals`；Windows 可将 `python` 换为 `.\.venv\Scripts\python.exe`。
@@ -107,6 +125,7 @@ fixture 只能用于预览，不能推送为真实日报。
 每个用户填写自己的 Intervals.icu API Key、模型 API 和发送时间，并在开通页**扫码绑定自己的
 微信机器人（iLink）**；`multidaemon` 每天按各自时区/时间独立生成并推送，互不串扰。用户数据存
 SQLite（默认 `data/users.sqlite3`，可用 `USERS_DB` 或 `STATE_DIR` 指定），文件权限 0600。
+自助开通默认最多接受 50 位用户（可用 `MAX_USERS` 调整）；满员后网页不再接受新注册，现有用户仍可修改自己的配置。
 
 ```powershell
 # 导入/更新用户（单个对象、数组或 {"users": [...]}）
@@ -149,8 +168,8 @@ python -m mcp4intervals web
 默认仅监听 127.0.0.1:8010；对外发布前设置 `ONBOARD_ADMIN_TOKEN` 打开管理员页登录门
 （支持 `?token=` 直链、`X-Onboard-Token` 头或登录表单 cookie），或用 `WEB_HOST`/`WEB_PORT` 调整并置于
 反代/Tailscale 之后。生成二维码图片需要 `pip install segno`（纯 Python、可选，缺失时退化为文字链接）。
-接口永不回传密钥，编辑时留空密钥字段即保留原值。每个条目在创建时设置独立的「管理密钥」
-（PBKDF2 哈希存储、不回传），之后编辑/删除/启停都必须提供，用户之间互不可改；管理员通过 SSH 上的
+接口永不回传密钥，编辑时留空密钥字段即保留原值。每个条目在创建时设置独立的「管理密码」
+（首次开通时由用户自己设定，PBKDF2 哈希存储、不回传），之后编辑/删除/启停都必须提供，用户之间互不可改；管理员通过 SSH 上的
 user remove/enable/disable 命令操作。
 
 ### 微信推送的「半推半拉」语义

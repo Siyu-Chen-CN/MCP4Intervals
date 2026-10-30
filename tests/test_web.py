@@ -9,7 +9,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from mcp4intervals.users import UserStore
+from mcp4intervals.users import UserStore, make_user
 from mcp4intervals.web import make_handler
 
 
@@ -62,15 +62,48 @@ class WebTests(unittest.TestCase):
         self.assertIn("开通", body)
         self.assertNotIn("已开通用户", body)
 
+    def test_root_contains_intervals_guide(self):
+        status, body = _request(self.port, "GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn("准备 Intervals 凭据", body)
+        self.assertIn("static/guide-intervals.png", body)
+        self.assertIn("https://intervals.icu/settings", body)
+
+    def test_static_guide_images_served(self):
+        for name in ("guide-intervals.png",):
+            req = Request(f"http://127.0.0.1:{self.port}/static/{name}", method="GET")
+            with urlopen(req, timeout=5) as resp:
+                self.assertEqual(200, resp.status)
+                self.assertEqual("image/png", resp.headers.get("Content-Type"))
+                data = resp.read(8)
+                self.assertEqual(0x89, data[0])
+                self.assertEqual(b"PNG", data[1:4])
+        status, _ = _request(self.port, "GET", "/static/not-there.png")
+        self.assertEqual(404, status)
+
     def test_create_requires_manage_secret(self):
         status, body = _request(self.port, "POST", "/api/user", BASE)
         self.assertEqual(400, status)
-        self.assertIn("管理密钥", json.loads(body)["message"])
+        self.assertIn("管理密码", json.loads(body)["message"])
         status, _ = _request(self.port, "POST", "/api/user", {**BASE, "manage_secret": "12345"})
         self.assertEqual(400, status)
         status, body = self.create()
         self.assertEqual(200, status)
         self.assertEqual("i123", json.loads(body)["athlete_id"])
+
+    def test_registration_cap(self):
+        with patch.dict(os.environ, {"MAX_USERS": "2"}):
+            self.store.upsert(make_user({**BASE, "athlete_id": "i1"}))
+            # one slot left under the cap of 2: a new registration succeeds
+            status, _ = _request(self.port, "POST", "/api/user",
+                                 {**BASE, "athlete_id": "i2", "manage_secret": "mysecret1"})
+            self.assertEqual(200, status)
+            # now at the cap: a further new registration is rejected
+            status, body = _request(self.port, "POST", "/api/user",
+                                    {**BASE, "athlete_id": "i3", "manage_secret": "mysecret2"})
+            self.assertEqual(400, status)
+            self.assertIn("上限", json.loads(body)["message"])
+            self.assertEqual(2, self.store.count())
 
     def test_list_requires_admin(self):
         self.create()

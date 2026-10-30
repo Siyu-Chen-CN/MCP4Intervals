@@ -328,6 +328,14 @@ class UserStore:
             db.close()
         return [make_user(json.loads(row[0])) for row in rows]
 
+    def count(self) -> int:
+        db = self._connect()
+        try:
+            row = db.execute("SELECT COUNT(*) FROM users").fetchone()
+        finally:
+            db.close()
+        return int(row[0]) if row else 0
+
     def remove(self, athlete_id: Any) -> bool:
         db = self._connect()
         try:

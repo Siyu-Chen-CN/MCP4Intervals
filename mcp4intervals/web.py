@@ -26,6 +26,17 @@ from .ilink import ILinkClient, ILinkError
 from .users import UserStore, canonical_athlete, make_user, user_to_dict
 
 
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+_STATIC_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+}
+
+
 PAGE = """<!doctype html>
 <html lang="zh">
 <head>
@@ -50,6 +61,18 @@ PAGE = """<!doctype html>
   #msg.err { display: block; background: #fee2e2; color: #991b1b; }
   h3 { font-size: 15px; margin: 16px 0 4px; border-top: 1px dashed #e5e7eb; padding-top: 14px; }
   .hint { color: #6b7280; font-size: 12px; margin-top: 4px; }
+  a { color: #2563eb; }
+  .guide-img { width: 100%; height: auto; display: block; border: 1px solid #e5e7eb; border-radius: 8px; }
+  .guide-link { display: inline-block; margin-top: 10px; background: #2563eb; color: #fff; padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600; }
+  .guide-link:hover { background: #1d4ed8; }
+  .label-help { font-weight: 400; font-size: 12px; color: #2563eb; margin-left: 6px; text-decoration: none; }
+  details.model-guide { margin: 8px 0; }
+  details.model-guide summary { cursor: pointer; font-weight: 600; color: #2563eb; }
+  .model-guide { overflow-x: auto; }
+  .model-guide table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .model-guide th, .model-guide td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; word-break: break-all; }
+  .model-guide th { background: #f3f4f6; font-weight: 600; }
+  .model-guide code { font-size: 11px; background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -67,18 +90,34 @@ PAGE = """<!doctype html>
   <div id="bindState" style="margin-top:6px">微信状态：未绑定</div>
 </div>
 <div class="step">
-  <b>第 2 步 · 填自己的凭据并保存</b>：Intervals.icu 的 API Key 在 Intervals 网站
-  Settings → Developer settings 里创建；模型选填（report_mode 选 summary 则不用模型）。
-  保存后每天按你设置的时区和时间自动推送训练建议。
+  <b>第 2 步 · 填自己的凭据并保存</b>：运动员 ID 和 API Key 的获取方法见下方
+  <a href="#intervals-guide" onclick="document.getElementById('intervals-guide').scrollIntoView({behavior:'smooth'});return false;">图示说明</a>；
+  模型选填（report_mode 选「规则摘要」则不用模型）。
+  保存后每天按你设置的时区和时间自动推送训练建议（本实例最多支持 __MAX_USERS__ 位用户，满员后不再接受新注册）。
+</div>
+
+<div id="intervals-guide" class="card" style="border-color:#bfdbfe;background:#f8fafc">
+  <h2 style="margin-top:0">准备 Intervals 凭据（运动员 ID + API Key）</h2>
+  <p class="hint" style="font-size:13px;margin-top:0">下面这张截图标出了「运动员 ID」和「API Key」的位置，照着找即可。</p>
+  <img class="guide-img" src="static/guide-intervals.png" alt="Intervals.icu 设置页截图：运动员 ID 与 API Key 位置" loading="lazy">
+  <div>
+    <a class="guide-link" href="https://intervals.icu" target="_blank" rel="noopener">直达：登录 Intervals.icu ↗</a>
+    <a class="guide-link" href="https://intervals.icu/settings" target="_blank" rel="noopener" style="margin-left:8px">直达：打开 Settings ↗</a>
+  </div>
+  <ol class="hint" style="font-size:13px;line-height:1.7;padding-left:18px;margin-bottom:0">
+    <li><b>运动员 ID</b>：登录 <a href="https://intervals.icu" target="_blank" rel="noopener">intervals.icu</a> 后，地址栏 <code>intervals.icu/athlete/i123456/…</code> 里的 <code>i123456</code> 就是（填 <code>i123456</code> 或 <code>123456</code> 均可）。</li>
+    <li><b>API Key</b>：进入 <a href="https://intervals.icu/settings" target="_blank" rel="noopener">Settings</a>，页面底部 <b>Developer Settings</b> 里生成并复制。</li>
+    <li>把这两项填进下方表单，保存即可。</li>
+  </ol>
 </div>
 
 <div class="card">
   <h2 id="formTitle">开通 / 修改我的配置</h2>
-  <label>Intervals 运动员 ID（athlete_id，如 i123 或 123）</label>
-  <input id="athlete_id" placeholder="i123">
+  <label>Intervals 运动员 ID（如 i123456 或 123456）<a href="#intervals-guide" class="label-help" onclick="document.getElementById('intervals-guide').scrollIntoView({behavior:'smooth'});return false;">怎么找？</a></label>
+  <input id="athlete_id" placeholder="i123456">
   <div class="row">
     <div>
-      <label>管理密钥（首次开通时自设 ≥6 位；修改时输入）</label>
+      <label>管理密码（首次开通时自己设一个，至少 6 位；以后修改配置时输入这个密码）</label>
       <input id="manage_secret" type="password" autocomplete="off">
     </div>
   </div>
@@ -86,10 +125,53 @@ PAGE = """<!doctype html>
     <button class="secondary" onclick="loadMine()">载入我的配置（修改时先点这个）</button>
   </div>
   <h3>账号</h3>
-  <label>Intervals.icu API Key</label>
+  <label>Intervals.icu API Key <a href="#intervals-guide" class="label-help" onclick="document.getElementById('intervals-guide').scrollIntoView({behavior:'smooth'});return false;">怎么找？</a></label>
   <input id="intervals_api_key" type="password" autocomplete="off">
   <div class="row">
-    <div><label>时区</label><input id="timezone" value="Europe/Amsterdam"></div>
+    <div><label>时区</label>
+      <select id="timezone">
+        <optgroup label="中国">
+          <option value="Asia/Shanghai">Asia/Shanghai（UTC+08:00）</option>
+          <option value="Asia/Hong_Kong">Asia/Hong_Kong（UTC+08:00）</option>
+          <option value="Asia/Taipei">Asia/Taipei（UTC+08:00）</option>
+        </optgroup>
+        <optgroup label="欧洲">
+          <option value="Europe/Amsterdam" selected>Europe/Amsterdam（UTC+01:00）</option>
+          <option value="Europe/London">Europe/London（UTC+00:00）</option>
+          <option value="Europe/Dublin">Europe/Dublin（UTC+00:00）</option>
+          <option value="Europe/Paris">Europe/Paris（UTC+01:00）</option>
+          <option value="Europe/Berlin">Europe/Berlin（UTC+01:00）</option>
+          <option value="Europe/Madrid">Europe/Madrid（UTC+01:00）</option>
+          <option value="Europe/Rome">Europe/Rome（UTC+01:00）</option>
+          <option value="Europe/Zurich">Europe/Zurich（UTC+01:00）</option>
+          <option value="Europe/Moscow">Europe/Moscow（UTC+03:00）</option>
+        </optgroup>
+        <optgroup label="北美">
+          <option value="America/New_York">America/New_York（UTC-05:00）</option>
+          <option value="America/Toronto">America/Toronto（UTC-05:00）</option>
+          <option value="America/Chicago">America/Chicago（UTC-06:00）</option>
+          <option value="America/Denver">America/Denver（UTC-07:00）</option>
+          <option value="America/Los_Angeles">America/Los_Angeles（UTC-08:00）</option>
+          <option value="America/Vancouver">America/Vancouver（UTC-08:00）</option>
+          <option value="America/Mexico_City">America/Mexico_City（UTC-06:00）</option>
+        </optgroup>
+        <optgroup label="亚太">
+          <option value="Asia/Tokyo">Asia/Tokyo（UTC+09:00）</option>
+          <option value="Asia/Seoul">Asia/Seoul（UTC+09:00）</option>
+          <option value="Asia/Singapore">Asia/Singapore（UTC+08:00）</option>
+          <option value="Asia/Bangkok">Asia/Bangkok（UTC+07:00）</option>
+          <option value="Asia/Dubai">Asia/Dubai（UTC+04:00）</option>
+          <option value="Asia/Kolkata">Asia/Kolkata（UTC+05:30）</option>
+          <option value="Australia/Sydney">Australia/Sydney（UTC+10:00）</option>
+          <option value="Australia/Melbourne">Australia/Melbourne（UTC+10:00）</option>
+          <option value="Australia/Perth">Australia/Perth（UTC+08:00）</option>
+          <option value="Pacific/Auckland">Pacific/Auckland（UTC+12:00）</option>
+        </optgroup>
+        <optgroup label="其他">
+          <option value="UTC">UTC（UTC+00:00）</option>
+        </optgroup>
+      </select>
+    </div>
     <div><label>每日发送时间</label><input id="send_at" value="07:00" placeholder="HH:MM"></div>
     <div>
       <label>报告类型</label>
@@ -101,26 +183,53 @@ PAGE = """<!doctype html>
   </div>
 
   <h3>模型 API（report_mode 选 AI 时必填）</h3>
-  <label>Base URL（如 https://…/v1）</label>
-  <input id="base_url" placeholder="https://…/v1">
-  <label>模型名</label>
-  <input id="model" placeholder="模型名">
-  <label>模型 API Key（本地模型可留空）</label>
-  <input id="model_api_key" type="password" autocomplete="off">
-  <div class="row">
-    <div><label>超时（秒）</label><input id="timeout" value="120"></div>
-    <div><label>最大 tokens</label><input id="max_tokens" value="2500"></div>
-    <div>
-      <label>允许明文 HTTP</label>
-      <select id="allow_http"><option value="false" selected>否</option><option value="true">是</option></select>
-    </div>
+  <p class="hint" style="margin-top:4px">三步：选<b>模型厂商</b> → 选<b>模型名</b> → 填 <b>API Key</b>。只有选「其他」才需要自己填 Base URL 和模型名；各平台 API Key 在哪拿，点开下面表格看。</p>
+  <div style="margin:8px 0;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:13px;color:#78350f;line-height:1.7">
+    <b>💡 推荐：DeepSeek 或 OpenAI</b><br>
+    · DeepSeek：<b>deepseek-flash</b> ≈ ¥0.01/天，<b>deepseek-v4-pro</b> ≈ ¥0.04/天<br>
+    · OpenAI：<b>GPT-6 Luna</b> ≈ ¥0.01/天，<b>GPT-6.1 Sol</b> ≈ ¥0.15/天<br>
+    <span style="color:#a16207;font-size:12px">按每天 1 份、约 3000 输入 + 1500 输出 token 粗略估算（1 美元 ≈ 7.2 元），实际以各平台计费为准。</span>
   </div>
+  <details class="model-guide">
+    <summary>展开：各平台填写示例（DeepSeek / ChatGPT / GLM / Kimi）</summary>
+    <div class="model-guide" style="margin-top:8px">
+      <table>
+        <thead><tr><th>平台</th><th>Base URL</th><th>模型名（示例）</th><th>API Key 在哪拿</th></tr></thead>
+        <tbody>
+          <tr><td>DeepSeek</td><td><code>https://api.deepseek.com</code></td><td><code>deepseek-flash</code> / <code>deepseek-v4-pro</code></td><td><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com/api_keys ↗</a></td></tr>
+          <tr><td>OpenAI（ChatGPT）</td><td><code>https://api.openai.com/v1</code></td><td><code>gpt-6-astra</code> / <code>gpt-6.1-sol</code> / <code>gpt-5.5</code> / <code>gpt-5.4-mini</code> 等</td><td><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys ↗</a></td></tr>
+          <tr><td>智谱 AI（GLM）</td><td><code>https://open.bigmodel.cn/api/paas/v4</code></td><td><code>glm-5.1</code> / <code>glm-5</code> / <code>glm-4-plus</code> 等</td><td><a href="https://open.bigmodel.cn/usercenter/apikeys" target="_blank" rel="noopener">open.bigmodel.cn → API Keys ↗</a></td></tr>
+          <tr><td>月之暗面（Kimi）</td><td><code>https://api.moonshot.cn/v1</code></td><td><code>kimi-k3.1-pro</code> / <code>kimi-k3</code></td><td><a href="https://platform.kimi.com/console/api-keys" target="_blank" rel="noopener">platform.kimi.com ↗</a></td></tr>
+        </tbody>
+      </table>
+      <p class="hint" style="margin-top:6px">Base URL 填根地址即可，程序会自动补 <code>/chat/completions</code>（也可以填完整地址）；模型名以各平台当前列表为准。调用模型会产生费用，请留意各平台的额度与充值。</p>
+    </div>
+  </details>
+  <label>模型厂商</label>
+  <select id="provider" onchange="onProviderChange()">
+    <option value="">请选择模型厂商…</option>
+    <option value="deepseek">DeepSeek</option>
+    <option value="openai">OpenAI（ChatGPT）</option>
+    <option value="zhipu">智谱 AI（GLM）</option>
+    <option value="kimi">月之暗面（Kimi）</option>
+    <option value="__custom__">其他（自己填 Base URL）</option>
+  </select>
+
+  <label id="base_url_label" style="display:none">Base URL（接口地址）</label>
+  <input id="base_url" placeholder="https://…/v1" style="display:none">
+
+  <label>模型名</label>
+  <select id="model_select" style="display:none" onchange="onModelSelect()"></select>
+  <input id="model" placeholder="模型名（先选模型厂商）">
+
+  <label>模型 API Key</label>
+  <input id="model_api_key" type="password" autocomplete="off">
 
   <div style="margin-top:16px">
     <button onclick="save()">保存</button>
     <button class="secondary" onclick="resetForm()">清空</button>
   </div>
-  <div class="hint">留空的密钥字段在修改时会保留原值；管理密钥请务必牢记。</div>
+  <div class="hint">留空的密钥字段在修改时会保留原值；管理密码请务必牢记。</div>
   <div id="msg"></div>
 </div>
 
@@ -128,6 +237,96 @@ PAGE = """<!doctype html>
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function el(id) { return document.getElementById(id); }
 function showMsg(text, ok) { var m = el('msg'); m.textContent = text; m.className = ok ? 'ok' : 'err'; }
+
+var PROVIDERS = {
+  "deepseek": { name: "DeepSeek", base: "https://api.deepseek.com", models: ["deepseek-flash", "deepseek-v4-pro"] },
+  "openai": { name: "OpenAI（ChatGPT）", base: "https://api.openai.com/v1", models: ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2", "gpt-5.2-pro"] },
+  "zhipu": { name: "智谱 AI（GLM）", base: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4-plus", "glm-4-flash"] },
+  "kimi": { name: "月之暗面（Kimi）", base: "https://api.moonshot.cn/v1", models: ["kimi-k3.1-pro", "kimi-k3"] }
+};
+var CUSTOM_MODEL = "__custom__";
+
+function hostOf(url) {
+  try {
+    var u = new URL(url.indexOf("://") === -1 ? "https://" + url : url);
+    return u.hostname.toLowerCase();
+  } catch (e) { return ""; }
+}
+
+function providerKeyFor(url) {
+  var host = hostOf(url);
+  for (var k in PROVIDERS) {
+    if (hostOf(PROVIDERS[k].base) === host) return k;
+  }
+  return null;
+}
+
+function onProviderChange() {
+  var key = el('provider').value;
+  var p = PROVIDERS[key];
+  var baseLabel = el('base_url_label');
+  var baseInput = el('base_url');
+  var sel = el('model_select');
+  var input = el('model');
+  if (key === CUSTOM_MODEL) {
+    baseLabel.style.display = 'block';
+    baseInput.style.display = 'block';
+    baseInput.value = '';
+    sel.style.display = 'none';
+    input.style.display = 'block';
+  } else if (p) {
+    baseLabel.style.display = 'none';
+    baseInput.style.display = 'none';
+    baseInput.value = p.base;
+    sel.innerHTML = '';
+    p.models.forEach(function(m) {
+      var o = document.createElement('option');
+      o.value = m; o.textContent = m;
+      sel.appendChild(o);
+    });
+    var custom = document.createElement('option');
+    custom.value = CUSTOM_MODEL; custom.textContent = '其他（手动输入）';
+    sel.appendChild(custom);
+    sel.style.display = 'block';
+    input.style.display = 'none';
+  } else {
+    baseLabel.style.display = 'none';
+    baseInput.style.display = 'none';
+    baseInput.value = '';
+    sel.style.display = 'none';
+    input.style.display = 'block';
+  }
+}
+
+function onModelSelect() {
+  if (el('model_select').value === CUSTOM_MODEL) {
+    el('model_select').style.display = 'none';
+    el('model').style.display = 'block';
+    el('model').value = '';
+    el('model').focus();
+  }
+}
+
+function currentModelName() {
+  var sel = el('model_select');
+  if (sel.style.display !== 'none' && sel.value) return sel.value;
+  return el('model').value.trim();
+}
+
+function setTimezone(value) {
+  var sel = el('timezone');
+  var v = value || 'Europe/Amsterdam';
+  var found = false;
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === v) { found = true; break; }
+  }
+  if (!found) {
+    var o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  }
+  sel.value = v;
+}
 
 var editingId = '';
 var bindQrcode = '';
@@ -140,14 +339,16 @@ function resetForm() {
   el('manage_secret').value = '';
   el('intervals_api_key').value = '';
   el('model_api_key').value = '';
-  el('timezone').value = 'Europe/Amsterdam';
+  setTimezone('Europe/Amsterdam');
   el('send_at').value = '07:00';
   el('report_mode').value = 'ai';
+  el('provider').value = '';
   el('base_url').value = '';
+  el('base_url').style.display = 'none';
+  el('base_url_label').style.display = 'none';
   el('model').value = '';
-  el('timeout').value = '120';
-  el('max_tokens').value = '2500';
-  el('allow_http').value = 'false';
+  el('model_select').style.display = 'none';
+  el('model').style.display = 'block';
   editingId = '';
   bindQrcode = '';
   bindDone = false;
@@ -157,21 +358,44 @@ function resetForm() {
 }
 
 function fillFrom(u) {
-  el('timezone').value = u.timezone;
+  setTimezone(u.timezone);
   el('send_at').value = u.send_at;
   el('report_mode').value = u.report_mode;
-  el('base_url').value = u.model_base_url || '';
-  el('model').value = u.model_name || '';
-  el('timeout').value = u.model_timeout || 120;
-  el('max_tokens').value = u.model_max_tokens || 2500;
-  el('allow_http').value = u.model_allow_http ? 'true' : 'false';
+  var baseUrl = u.model_base_url || '';
+  var mname = u.model_name || '';
+  var key = baseUrl ? providerKeyFor(baseUrl) : null;
+  if (key) {
+    el('provider').value = key;
+    onProviderChange();
+    var sel = el('model_select');
+    if (mname) {
+      var found = false;
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === mname) { sel.value = mname; found = true; break; }
+      }
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = mname; o.textContent = mname;
+        sel.insertBefore(o, sel.options[sel.options.length - 1]);
+        sel.value = mname;
+      }
+    }
+  } else if (baseUrl || mname) {
+    el('provider').value = CUSTOM_MODEL;
+    onProviderChange();
+    el('base_url').value = baseUrl;
+    el('model').value = mname;
+  } else {
+    el('provider').value = '';
+    onProviderChange();
+  }
 }
 
 function loadMine() {
   var id = el('athlete_id').value.trim();
   var secret = el('manage_secret').value.trim();
   if (!id) { showMsg('请先填写运动员 ID', false); return; }
-  if (!secret) { showMsg('请输入管理密钥以载入配置', false); return; }
+  if (!secret) { showMsg('请输入管理密码以载入配置', false); return; }
   fetch('api/user/' + encodeURIComponent(id) + '/load', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manage_secret: secret }) })
     .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
     .then(function(res){
@@ -248,15 +472,12 @@ function save() {
   };
   if (bindQrcode) { body.qrcode = bindQrcode; }
   var base = el('base_url').value.trim();
-  var model = el('model').value.trim();
+  var model = currentModelName();
   if (base || model) {
     body.model = {
       base_url: base,
       model: model,
-      api_key: el('model_api_key').value.trim(),
-      timeout: parseInt(el('timeout').value, 10) || 120,
-      max_tokens: parseInt(el('max_tokens').value, 10) || 2500,
-      allow_http: el('allow_http').value === 'true'
+      api_key: el('model_api_key').value.trim()
     };
   }
   fetch('api/user', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -362,6 +583,13 @@ def configured_token() -> str:
     return os.getenv("ONBOARD_ADMIN_TOKEN", "").strip()
 
 
+def max_users() -> int:
+    try:
+        return max(0, int(os.getenv("MAX_USERS", "50")))
+    except ValueError:
+        return 50
+
+
 def web_base() -> str:
     prefix = os.getenv("WEB_PREFIX", "").strip().strip("/")
     return "/" + prefix + "/" if prefix else "/"
@@ -439,6 +667,28 @@ def make_handler(bound_store: UserStore):
             self.end_headers()
             self.wfile.write(data)
 
+        def _respond_bytes(self, status, data, content_type):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _serve_static(self, rel):
+            name = os.path.basename(rel)
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in _STATIC_TYPES:
+                self._json(404, {"status": "error", "message": "未找到"})
+                return
+            path = os.path.join(STATIC_DIR, name)
+            try:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                self._json(404, {"status": "error", "message": "未找到"})
+                return
+            self._respond_bytes(200, data, _STATIC_TYPES[ext])
+
         def _json(self, status, payload):
             self._respond(status, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8")
 
@@ -483,7 +733,7 @@ def make_handler(bound_store: UserStore):
                 return
             secret = (data.get("manage_secret") or "").strip() if isinstance(data, dict) else ""
             if not self.store.check_manage_secret(athlete_id, secret):
-                raise AppError("管理密钥错误或缺失；只有创建者可以修改该条目。")
+                raise AppError("管理密码错误或缺失；只有创建者可以修改该条目。")
 
         def do_GET(self):
             parsed = urlparse(self.path)
@@ -499,7 +749,9 @@ def make_handler(bound_store: UserStore):
                 page = ADMIN_PAGE if _is_admin(self) else ADMIN_LOGIN
                 self._respond(200, page.replace("__BASE__", web_base()), "text/html; charset=utf-8")
             elif path in ("/", ""):
-                self._respond(200, PAGE.replace("__BASE__", web_base()), "text/html; charset=utf-8")
+                self._respond(200, PAGE.replace("__BASE__", web_base()).replace("__MAX_USERS__", str(max_users())), "text/html; charset=utf-8")
+            elif path.startswith("/static/"):
+                self._serve_static(path[len("/static/"):])
             else:
                 self._json(404, {"status": "error", "message": "未找到"})
 
@@ -577,9 +829,11 @@ def make_handler(bound_store: UserStore):
                         user = make_user(self._merge(existing, data))
                         self.store.upsert(user)
                     else:
+                        if self.store.count() >= max_users():
+                            raise AppError(f"注册人数已达上限（{max_users()} 人），暂不接受新的注册。")
                         secret = (data.get("manage_secret") or "").strip()
                         if len(secret) < 6:
-                            raise AppError("首次开通必须设置至少 6 位管理密钥。")
+                            raise AppError("首次开通必须设置至少 6 位管理密码。")
                         user = make_user(data)
                         self.store.upsert(user)
                         self.store.set_manage_secret(athlete, secret)
