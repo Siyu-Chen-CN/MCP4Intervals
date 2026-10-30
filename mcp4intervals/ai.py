@@ -124,14 +124,40 @@ CHAT_SYSTEM_PROMPT = """你是骑行训练 AI 教练，通过微信回答骑手�
 - 仅当用户明确要求"安排/创建/新增训练课程"、或让你把某次训练写进日历，才在回答末尾输出一段课程标记；否则绝对不要输出该标记。
 - 标记格式（放在回答最后）：
 <<<WORKOUT>>>
-{"workout": {"name": "简短标题", "date": "YYYY-MM-DD", "type": "Ride", "moving_time": 3600, "description": "训练内容"}}
+name: 简短标题（不要加 "AI Coach" 前缀，程序会自动加）
+date: YYYY-MM-DD（默认明天）
+type: Ride（默认 Ride，也可是 Run/Swim 等）
+moving_time: 总时长秒
+---
+结构化训练文本
 <<<END>>>
-- name 是简短标题（不要加 "AI Coach" 前缀，程序会自动加）。
-- date 是训练日期 YYYY-MM-DD（默认明天）。
-- type 是运动类型（默认 Ride，也可是 Run/Swim 等）。
-- moving_time 是计划时长（秒，可选）。
-- description 是训练内容说明（如区间、时长、强度）。
+- 结构化训练文本必须用 Intervals.icu 原生格式、必须带功率目标（% ftp），这样码表和室内骑行台（ERG）才能显示并控制阻力。
+- 用 "- " 开头的步骤行 + 分组标题（不带 "-"），例如：
+
+  Warmup
+  - Easy start 15m ramp 45%-65% ftp
+
+  2x
+  - Steady tempo 12m 80%-85% ftp
+  - Recover 4m 50% ftp
+
+  - Endurance 33m 55%-65% ftp
+
+  Cooldown
+  - Ease out 10m ramp 55%-40% ftp
+
+- 功率写法：单一目标 "- 时长 80% ftp"；范围 "- 时长 80%-85% ftp"；渐进 "- 时长 ramp 45%-65% ftp"。
+- 可在步骤上方先写一两句训练目标和调整依据，再写步骤。
+- moving_time 是所有步骤时长之和（秒），重复组要乘以重复次数。
 """
+
+
+def _safe_int(value):
+    try:
+        n = int(str(value).strip())
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_workout(content):
@@ -141,12 +167,32 @@ def _parse_workout(content):
     end = content.find("<<<END>>>", start)
     if end < 0:
         return content.strip(), None
-    try:
-        data = json.loads(content[start + len("<<<WORKOUT>>>"):end])
-    except ValueError:
-        return content.strip(), None
-    workout = data.get("workout") if isinstance(data, dict) else None
-    if not isinstance(workout, dict):
+    raw = content[start + len("<<<WORKOUT>>>"):end].strip()
+    workout = None
+    if "---" in raw:
+        header, _, steps = raw.partition("---")
+        meta = {}
+        for line in header.splitlines():
+            line = line.strip()
+            if ":" in line:
+                key, _, value = line.partition(":")
+                meta[key.strip().lower()] = value.strip()
+        if meta.get("name"):
+            workout = {
+                "name": meta["name"],
+                "date": meta.get("date", ""),
+                "type": meta.get("type", "Ride"),
+                "moving_time": _safe_int(meta.get("moving_time")),
+                "description": steps.strip(),
+            }
+    else:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("workout"), dict):
+            workout = data["workout"]
+    if workout is None:
         return content.strip(), None
     text = (content[:start] + content[end + len("<<<END>>>"):]).strip()
     return text, workout

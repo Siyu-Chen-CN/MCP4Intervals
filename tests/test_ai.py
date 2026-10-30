@@ -107,6 +107,17 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual("没有课程，只是建议。", text)
         self.assertIsNone(workout)
 
+    def test_parse_workout_structured(self):
+        content = ('建议。\n<<<WORKOUT>>>\nname: 恢复骑\ndate: 2026-10-31\ntype: Ride\nmoving_time: 3660\n---\n'
+                   'Warmup\n- Easy start 15m ramp 45%-65% ftp\n\n2x\n- Steady tempo 12m 80%-85% ftp\n- Recover 4m 50% ftp\n<<<END>>>')
+        text, workout = _parse_workout(content)
+        self.assertEqual("建议。", text)
+        self.assertEqual("恢复骑", workout["name"])
+        self.assertEqual(3660, workout["moving_time"])
+        self.assertEqual("Ride", workout["type"])
+        self.assertIn("- Easy start 15m ramp 45%-65% ftp", workout["description"])
+        self.assertIn("2x", workout["description"])
+
     def test_chat_reply_returns_answer_and_workout(self):
         content = '今天建议休息。\n<<<WORKOUT>>>\n{"workout": {"name": "轻松骑", "date": "2026-10-31", "moving_time": 3600}}\n<<<END>>>'
         response = {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
