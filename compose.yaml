@@ -1,0 +1,16 @@
+services:
+  wechat-reporter:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STATE_DIR: /app/data
+    volumes:
+      - reporter-data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+volumes:
+  reporter-data:

@@ -1,0 +1,3 @@
+-r requirements.txt
+# Optional local stdio adapter; separate from the existing remote OAuth MCP server.
+mcp>=1.12,<2

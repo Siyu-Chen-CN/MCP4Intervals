@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-30",
+  "wellness": [
+    {"id": "2026-10-26", "restingHR": 44, "hrv": 53},
+    {"id": "2026-10-27", "restingHR": 46, "hrv": 61},
+    {"id": "2026-10-28", "restingHR": 43, "hrv": 84, "sleepSecs": 18720},
+    {"id": "2026-10-29", "restingHR": 48, "hrv": 42, "sleepSecs": 26880},
+    {"id": "2026-10-30", "restingHR": 49, "hrv": 68, "sleepSecs": null}
+  ],
+  "activities": [
+    {"name": "演示长骑（非实时数据）", "start_date_local": "2026-10-28T09:00:00", "type": "Ride", "distance": 146400, "moving_time": 19320, "icu_training_load": 280, "icu_weighted_avg_watts": 166}
+  ],
+  "events": [
+    {"name": "演示：90分钟轻松骑", "start_date_local": "2026-10-31T09:00:00", "category": "WORKOUT", "moving_time": 5400},
+    {"name": "演示：3×8分钟甜点", "start_date_local": "2026-11-03T07:00:00", "category": "WORKOUT", "moving_time": 5400}
+  ]
+}

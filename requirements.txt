@@ -1,0 +1,2 @@
+# Needed for IANA timezones on Windows; system zoneinfo is used when available.
+tzdata>=2024.1,<2028
