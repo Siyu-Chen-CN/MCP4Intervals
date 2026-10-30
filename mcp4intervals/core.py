@@ -17,11 +17,17 @@ from statistics import mean
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .ilink import ILinkClient, ILinkError
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class AppError(Exception):
     """A message safe to print without credentials or remote response bodies."""
+
+
+class ContextExpired(AppError):
+    """The WeChat session context is gone; retry after the user messages the bot."""
 
 
 def load_env(path: Path) -> None:
@@ -45,11 +51,14 @@ def load_env(path: Path) -> None:
 class Config:
     api_key: str = ""
     athlete_id: str = "0"
-    sendkey: str = ""
+    bot_token: str = ""
+    ilink_bot_id: str = ""
+    ilink_user_id: str = ""
+    base_url: str = "https://ilinkai.weixin.qq.com"
+    context_token: str = ""
     timezone: str = "Europe/Amsterdam"
     send_at: str = "07:00"
     state_dir: Path = ROOT / "data"
-    channel: str = ""
     report_mode: str = "summary"
 
     @classmethod
@@ -57,11 +66,14 @@ class Config:
         cfg = cls(
             api_key=os.getenv("INTERVALS_API_KEY", ""),
             athlete_id=os.getenv("INTERVALS_ATHLETE_ID", "0"),
-            sendkey=os.getenv("SERVERCHAN_SENDKEY", ""),
+            bot_token=os.getenv("ILINK_BOT_TOKEN", ""),
+            ilink_bot_id=os.getenv("ILINK_BOT_ID", ""),
+            ilink_user_id=os.getenv("ILINK_USER_ID", ""),
+            base_url=os.getenv("ILINK_BASE_URL", "https://ilinkai.weixin.qq.com"),
+            context_token=os.getenv("ILINK_CONTEXT_TOKEN", ""),
             timezone=os.getenv("REPORT_TIMEZONE", "Europe/Amsterdam"),
             send_at=os.getenv("REPORT_TIME", "07:00"),
             state_dir=Path(os.getenv("STATE_DIR", str(ROOT / "data"))),
-            channel=os.getenv("SERVERCHAN_CHANNEL", ""),
             report_mode=os.getenv("REPORT_MODE", "summary"),
         )
         if cfg.report_mode not in ("summary", "ai"):
@@ -82,7 +94,7 @@ class Config:
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        # Keep Intervals Basic auth and the SendKey on their original hosts.
+        # Keep Intervals Basic auth and the iLink token on their original hosts.
         return None
 
 
@@ -95,7 +107,7 @@ def request_json(url: str, *, data: bytes | None = None, headers=None, timeout=3
         with opener.open(request, timeout=timeout) as response:
             return json.loads(response.read(2_000_001))
     except urllib.error.HTTPError as exc:
-        # Never print the exception: the URL contains the SendKey.
+        # Never print the exception: it may embed request details.
         raise AppError(f"远程请求返回 HTTP {exc.code}，请检查凭据、权限及服务状态。") from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise AppError("远程请求未能确认成功，请检查网络；推送超时不自动重发。") from None
@@ -207,24 +219,22 @@ def render_report(snapshot: dict, day: date) -> str:
     return "\n".join(lines) + "\n"
 
 
-def send_serverchan(cfg: Config, title: str, body: str) -> None:
-    if not re.fullmatch(r"SCT[A-Za-z0-9]+", cfg.sendkey):
-        raise AppError("请填写 Server酱 Turbo 的 SCT 开头 SendKey；本草稿不支持 SC3 的 sctp Key。")
-    payload = {"title": title, "desp": body}
-    if cfg.channel:
-        payload["channel"] = cfg.channel
-    result = request_json(
-        f"https://sctapi.ftqq.com/{cfg.sendkey}.send",
-        data=urllib.parse.urlencode(payload).encode(),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    if not isinstance(result, dict) or type(result.get("code")) is not int or result["code"] != 0:
-        # The response body might contain confidential data; do not log it.
-        raise AppError("Server酱未确认接受消息，请在控制台检查通道、SendKey 和额度。")
+def send_ilink(cfg: Config, title: str, body: str) -> None:
+    if not cfg.bot_token or not cfg.ilink_user_id:
+        raise AppError("尚未绑定微信机器人（缺少 iLink 凭据），请先在开通页扫码绑定。")
+    if not cfg.context_token:
+        raise ContextExpired("微信会话上下文已失效，请让该用户给机器人发一条消息后再试。")
+    client = ILinkClient(base_url=cfg.base_url, token=cfg.bot_token)
+    try:
+        client.send_text(cfg.ilink_user_id, cfg.context_token, f"{title}\n{body}")
+    except ILinkError as exc:
+        if exc.code in (-2, -14):
+            raise ContextExpired("微信会话上下文已失效，需用户重新发消息或重新扫码。") from None
+        raise AppError("微信推送未确认成功，请稍后核对微信是否收到。") from None
 
 
 def deliver(cfg: Config, day: date, title: str, body: str, *, kind="daily",
-            sender: Callable = send_serverchan) -> dict:
+            sender: Callable = send_ilink) -> dict:
     """Reserve a daily slot before sending; ambiguous failures require manual review.
 
     SQLite makes overlapping processes atomic. This is at-most-one automatic attempt,
@@ -242,7 +252,7 @@ def deliver(cfg: Config, day: date, title: str, body: str, *, kind="daily",
     try:
         db.execute("CREATE TABLE IF NOT EXISTS deliveries (slot TEXT PRIMARY KEY, status TEXT NOT NULL, digest TEXT NOT NULL, updated TEXT NOT NULL)")
         # Namespace by destination, never store the secret itself.
-        destination = hashlib.sha256(cfg.sendkey.encode()).hexdigest()[:16]
+        destination = hashlib.sha256(cfg.ilink_user_id.encode()).hexdigest()[:16]
         slot = f"{destination}:{kind}:{day.isoformat()}"
         digest = hashlib.sha256(body.encode()).hexdigest()
         with db:
@@ -252,18 +262,24 @@ def deliver(cfg: Config, day: date, title: str, body: str, *, kind="daily",
             status = db.execute("SELECT status FROM deliveries WHERE slot=?", (slot,)).fetchone()[0]
             if status == "sent":
                 return {"status": "already_sent", "date": day.isoformat()}
-            raise AppError("当天这类消息已有一次未确认的推送，请核对微信及Server酱控制台，不自动重试。")
+            raise AppError("当天这类消息已有一次未确认的推送，请核对微信，不自动重试。")
         try:
             sender(cfg, title, body)
+        except ContextExpired:
+            # Retryable: the WeChat session context expired. Roll the slot back
+            # so the daemon can retry once the user messages the bot again.
+            with db:
+                db.execute("DELETE FROM deliveries WHERE slot=?", (slot,))
+            raise
         except Exception:
             with db:
                 db.execute("UPDATE deliveries SET status='uncertain', updated=? WHERE slot=?",
                            (datetime.now().isoformat(), slot))
-            raise AppError("推送未确认成功；请核对微信和Server酱控制台。为避免重复，当天不自动重发。") from None
+            raise AppError("推送未确认成功；请核对微信。为避免重复，当天不自动重发。") from None
         with db:
             db.execute("UPDATE deliveries SET status='sent', updated=? WHERE slot=?",
                        (datetime.now().isoformat(), slot))
-        return {"status": "accepted_by_serverchan", "date": day.isoformat()}
+        return {"status": "accepted_by_ilink", "date": day.isoformat()}
     finally:
         db.close()
 
@@ -280,16 +296,35 @@ def delivery_status(cfg: Config, day: date, *, kind="daily") -> dict | None:
     try:
         if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='deliveries'").fetchone():
             return None
-        destination = hashlib.sha256(cfg.sendkey.encode()).hexdigest()[:16]
+        destination = hashlib.sha256(cfg.ilink_user_id.encode()).hexdigest()[:16]
         row = db.execute("SELECT status FROM deliveries WHERE slot=?",
                          (f"{destination}:{kind}:{day.isoformat()}",)).fetchone()
         if row is None:
             return None
         if row[0] == "sent":
             return {"status": "already_sent", "date": day.isoformat()}
-        raise AppError("当天这类消息已有一次未确认的推送，请核对微信及Server酱控制台，不自动重试。")
+        raise AppError("当天这类消息已有一次未确认的推送，请核对微信，不自动重试。")
     finally:
         db.close()
+
+
+def run_report(cfg: Config, day: date, mode: str | None = None, model=None) -> dict:
+    """Fetch, build and deliver one athlete's daily report; return the delivery status.
+
+    "mode" overrides "cfg.report_mode". A data or model failure raises without sending;
+    a push failure raises without retrying (the delivery slot stays reserved).
+    """
+    mode = mode or cfg.report_mode
+    existing = delivery_status(cfg, day)
+    if existing:
+        return existing
+    snapshot = fetch_snapshot(cfg, day)
+    if mode == "ai":
+        from .ai import analyze_snapshot
+        report = analyze_snapshot(snapshot, day, model)
+    else:
+        report = render_report(snapshot, day)
+    return deliver(cfg, day, f"骑行日报 {day.isoformat()}", report)
 
 
 def scheduled_tick(cfg: Config, now: datetime, run: Callable) -> bool:

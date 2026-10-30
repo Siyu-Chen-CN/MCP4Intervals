@@ -7,8 +7,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from mcp4intervals.core import (AppError, Config, deliver, render_report,
-                                request_json, scheduled_tick, send_serverchan)
+from mcp4intervals.core import (AppError, Config, ContextExpired, deliver, render_report,
+                                request_json, scheduled_tick, send_ilink)
 
 
 class ReportTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class ReportTests(unittest.TestCase):
 class DeliveryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.cfg = Config(sendkey="SCTexample", state_dir=Path(self.tmp.name))
+        self.cfg = Config(ilink_user_id="owner@im.wechat", state_dir=Path(self.tmp.name))
         self.day = date(2026, 10, 30)
 
     def tearDown(self):
@@ -54,20 +54,20 @@ class DeliveryTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(run, range(4)))
         self.assertEqual(1, len(sent))
-        self.assertEqual(1, sum(r["status"] == "accepted_by_serverchan" for r in results))
+        self.assertEqual(1, sum(r["status"] == "accepted_by_ilink" for r in results))
         self.assertEqual(3, sum(r["status"] == "already_sent" for r in results))
 
     def test_ambiguous_failure_is_not_retried(self):
         calls = []
         def fail(*args):
             calls.append(args)
-            raise RuntimeError("SCTsecret-must-not-leak")
+            raise RuntimeError("tokensecret-must-not-leak")
         with self.assertRaises(AppError) as first:
             deliver(self.cfg, self.day, "title", "body", sender=fail)
         with self.assertRaises(AppError):
             deliver(self.cfg, self.day, "title", "body", sender=fail)
         self.assertEqual(1, len(calls))
-        self.assertNotIn("SCTsecret", str(first.exception))
+        self.assertNotIn("tokensecret", str(first.exception))
 
     def test_empty_and_oversize_reports_are_rejected_before_sending(self):
         sent = []
@@ -76,22 +76,27 @@ class DeliveryTests(unittest.TestCase):
                 deliver(self.cfg, self.day, "title", body, sender=lambda *a: sent.append(a))
         self.assertEqual([], sent)
 
-    def test_provider_code_is_required_and_payload_is_encoded(self):
-        with patch("mcp4intervals.core.request_json", return_value={"code": 0}) as req:
-            send_serverchan(self.cfg, "测试", "完整中文报告")
-            self.assertIn(b"desp=", req.call_args.kwargs["data"])
-        for response in ({"code": 40001}, {"code": "0"}, {}, {"code": False}):
-            with patch("mcp4intervals.core.request_json", return_value=response):
-                with self.assertRaises(AppError):
-                    send_serverchan(self.cfg, "测试", "报告")
+    def test_send_ilink_requires_bound_account_and_context(self):
+        with self.assertRaises(AppError):
+            send_ilink(Config(), "测试", "报告")
+        with self.assertRaises(ContextExpired):
+            send_ilink(Config(bot_token="t", ilink_user_id="u"), "测试", "报告")
 
-    def test_http_exception_hides_url_with_sendkey(self):
-        error = urllib.error.HTTPError("https://example.test/SCTsecret.send", 403, "secret", {}, io.BytesIO())
+    def test_send_ilink_sends_title_and_body(self):
+        cfg = Config(bot_token="t", ilink_user_id="u", context_token="ctx",
+                     base_url="https://ilinkai.weixin.qq.com")
+        with patch("mcp4intervals.core.ILinkClient") as client_cls:
+            send_ilink(cfg, "标题", "正文")
+        client_cls.assert_called_once_with(base_url="https://ilinkai.weixin.qq.com", token="t")
+        client_cls.return_value.send_text.assert_called_once_with("u", "ctx", "标题\n正文")
+
+    def test_http_exception_hides_url(self):
+        error = urllib.error.HTTPError("https://example.test/apisecret.send", 403, "secret", {}, io.BytesIO())
         with patch("urllib.request.build_opener") as build:
             build.return_value.open.side_effect = error
             with self.assertRaises(AppError) as raised:
-                request_json("https://example.test/SCTsecret.send")
-        self.assertNotIn("SCTsecret", str(raised.exception))
+                request_json("https://example.test/apisecret.send")
+        self.assertNotIn("apisecret", str(raised.exception))
         self.assertIn("403", str(raised.exception))
 
 

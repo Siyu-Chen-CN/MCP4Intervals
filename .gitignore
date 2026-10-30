@@ -5,3 +5,6 @@ __pycache__/
 data/
 *.log
 .integration/
+acl-recovery/
+.pytest_cache/
+.ruff_cache/

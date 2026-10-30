@@ -16,7 +16,7 @@
 |---|---|---|---|
 | `get_daily_coach_summary` | `report_date` 可选，默认今天 | read | 使用现有 Intervals 客户端读取数据，返回中文摘要 |
 | `analyze_daily_training` | `report_date` 可选，默认今天 | write | 读取数据并发送摘要至服务端配置的模型 API，返回完整 AI 报告 |
-| `send_daily_coach_report` | `report`、`report_date` 必填 | write | 通过 Server酱推送完整报告，仅接受今天 |
+| `send_daily_coach_report` | `report`、`report_date` 必填 | write | 通过微信 iLink 机器人推送完整报告，仅接受今天 |
 
 日期均使用 `REPORT_TIMEZONE`（默认 Europe/Amsterdam）。摘要与分析可指定历史日期。
 模型调用可能计费且向外部模型发送训练摘要，因此标为 write 和 `openWorldHint=true`；微信发送同样标为外部写操作。
@@ -64,8 +64,10 @@ MCP_TOOLSET=full
 MCP_PERMISSIONS=read,write
 
 REPORT_TIMEZONE=Europe/Amsterdam
-SERVERCHAN_SENDKEY=你的SCT开头SendKey
-SERVERCHAN_CHANNEL=
+ILINK_BOT_TOKEN=
+ILINK_BOT_ID=
+ILINK_USER_ID=
+ILINK_CONTEXT_TOKEN=
 COACH_STATE_DIR=/data/coach-delivery
 
 # 仅使用服务端 AI 分析时填写；客户端自己分析可以全部留空
@@ -105,7 +107,7 @@ LLM_ALLOW_HTTP=false
 }
 ```
 
-`accepted_by_serverchan` 表示服务接受；`already_sent` 表示已有同日 coach 消息，不再发送。
+`accepted_by_ilink` 表示微信接口接受；`already_sent` 表示已有同日 coach 消息，不再发送。
 失败或不确定时保留返回的报告，并在微信和控制台核对；不能因为模型重写了文字就绕过同日发送限制。
 
 ## 定时运行

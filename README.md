@@ -1,9 +1,9 @@
 # MCP4Intervals
 
-读取 Intervals.icu，生成中文骑行日报，支持用户自选模型 API 分析和 Server酱微信推送。
+读取 Intervals.icu，生成中文骑行日报，支持用户自选模型 API 分析和微信官方 iLink 机器人推送。
 可独立定时运行，也可把工具合并到树莓派上现有的 `futureweb/intervals-mcp-server`，复用其远程传输及 OAuth 权限。
 
-当前为单用户实现。每个独立部署配置自己的 Intervals.icu、模型和微信凭据；共享服务器的多用户模型及接收人隔离暂未实现。
+当前支持多用户自助服务：统一部署、按用户隔离各自的 Intervals.icu、模型和微信凭据（见「多用户自助服务」）。
 
 ## 已实现功能
 
@@ -34,14 +34,14 @@ notepad .env
 ```dotenv
 INTERVALS_API_KEY=你的Intervals_API_Key
 INTERVALS_ATHLETE_ID=0
-SERVERCHAN_SENDKEY=你的SCT开头SendKey
 REPORT_TIMEZONE=Europe/Amsterdam
 REPORT_TIME=07:00
 REPORT_MODE=summary
 ```
 
-`.env` 只保留在自己的设备上。微信推送使用 Server酱 Turbo 的 `SCT...` Key，未接入 SC3 的 `sctp...`。
-配置并绑定接收通道后，正文会经过 Server酱；服务接受请求不代表手机已经收到。
+`.env` 只保留在自己的设备上。上面的变量驱动单用户模式（`daemon`/`send`/`send-file`/stdio MCP）；
+微信推送走 iLink 机器人，需额外设置 `ILINK_BOT_TOKEN`、`ILINK_USER_ID`、`ILINK_CONTEXT_TOKEN`
+（见 `.env.example`）。多用户自助服务（`web` + `multidaemon`）不读这些变量，每个用户在网页上单独扫码绑定。
 
 ## 配置自选模型
 
@@ -63,7 +63,7 @@ Docker 内的 localhost 指容器本身；访问树莓派上的另一容器时�
 可选配置：`LLM_TIMEOUT=120`（秒）、`LLM_MAX_TOKENS=2500`。模型接口接收 `model`、`messages`、`max_tokens` 和 `stream=false`，返回 `choices[0].message.content`。
 
 AI 模式会把归一化的训练摘要（含指标、活动名称及日历名称）发送至配置的模型服务，可能产生该服务的调用费用。
-不发送 Intervals API Key、SendKey 或原始活动轨迹。空正文、截断、错误格式和超长输出都会报错，不会悄悄降级成规则摘要推送。
+不发送 Intervals API Key、微信机器人凭据或原始活动轨迹。空正文、截断、错误格式和超长输出都会报错，不会悄悄降级成规则摘要推送。
 
 ## 命令
 
@@ -102,6 +102,66 @@ fixture 只能用于预览，不能推送为真实日报。
 数据拉取失败会重试；一旦模型请求失败，当前进程当天不再自动调用模型，可修复后手动 `send --mode ai`。
 模型失败的停用标记仅在内存中，重启会重新尝试；已占用的推送名额则持久化保存。
 
+## 多用户自助服务
+
+每个用户填写自己的 Intervals.icu API Key、模型 API 和发送时间，并在开通页**扫码绑定自己的
+微信机器人（iLink）**；`multidaemon` 每天按各自时区/时间独立生成并推送，互不串扰。用户数据存
+SQLite（默认 `data/users.sqlite3`，可用 `USERS_DB` 或 `STATE_DIR` 指定），文件权限 0600。
+
+```powershell
+# 导入/更新用户（单个对象、数组或 {"users": [...]}）
+python -m mcp4intervals user import users.json
+# 查看用户（不含密钥）
+python -m mcp4intervals user list
+python -m mcp4intervals user enable i123   # 或 disable / remove
+# 运行多用户调度进程
+python -m mcp4intervals multidaemon
+# 启动网页自助开通（默认 127.0.0.1:8010）
+python -m mcp4intervals web
+```
+
+每个用户的 JSON 结构（网页开通会自动写入 `bot_token` 等微信字段；手动导入可省略，之后网页补绑）：
+
+```json
+{
+  "athlete_id": "i123",
+  "intervals_api_key": "用户的Intervals API Key",
+  "bot_token": "扫码绑定后自动写入",
+  "ilink_bot_id": "扫码绑定后自动写入",
+  "ilink_user_id": "扫码绑定后自动写入",
+  "base_url": "https://ilinkai.weixin.qq.com",
+  "timezone": "Europe/Amsterdam",
+  "send_at": "07:00",
+  "report_mode": "ai",
+  "model": {
+    "base_url": "https://模型服务地址/v1",
+    "model": "模型名",
+    "api_key": "模型Key（本地模型可留空）",
+    "timeout": 120,
+    "max_tokens": 2500,
+    "allow_http": false
+  }
+}
+```
+
+网页自助开通：`python -m mcp4intervals web` 提供单页开通界面（点「生成绑定二维码」→ 微信扫码确认 →
+**用微信给机器人发任意一条消息**建立会话 → 填自己的 Intervals Key / 模型 / 时间 → 保存）。
+默认仅监听 127.0.0.1:8010；对外发布前设置 `ONBOARD_ADMIN_TOKEN` 打开管理员页登录门
+（支持 `?token=` 直链、`X-Onboard-Token` 头或登录表单 cookie），或用 `WEB_HOST`/`WEB_PORT` 调整并置于
+反代/Tailscale 之后。生成二维码图片需要 `pip install segno`（纯 Python、可选，缺失时退化为文字链接）。
+接口永不回传密钥，编辑时留空密钥字段即保留原值。每个条目在创建时设置独立的「管理密钥」
+（PBKDF2 哈希存储、不回传），之后编辑/删除/启停都必须提供，用户之间互不可改；管理员通过 SSH 上的
+user remove/enable/disable 命令操作。
+
+### 微信推送的「半推半拉」语义
+
+iLink 机器人**不能无上下文主动推送**（协议里没有「打开会话」接口）：它需要用户先给机器人发过一条消息、
+拿到会话上下文 `context_token`，之后才能回复。因此多用户日报按以下方式送达：
+
+- 用户在开通页扫码绑定后，需用微信给机器人发任意一条消息（如「开通」），建立上下文；
+- `multidaemon` 每天定时**尝试**主动推送，上下文仍有效就推成功；
+- 上下文过期后（协议返回 -2/-14），机器人先等待，用户下次发任意消息时**立刻补推**当天日报。
+
 ## 树莓派部署
 
 **合并到现有远程 MCP**：见 [docs/AI_COACH_INTEGRATION.md](docs/AI_COACH_INTEGRATION.md)。工具复用现有服务，不新增远程监听端口。
@@ -134,9 +194,9 @@ python -m mcp4intervals mcp-stdio
 - 当天恢复数据缺失显示“未知”，不复用昨天；日历无记录不代表休息。
 - 近7天负荷排除今天，缺失数量单列；HRV 来源未核实，不据此自动判断恢复或加量。
 - SQLite 按接收配置、消息类型、日期原子占位，限制每类每天一次自动推送尝试；状态不存正文。
-- 超时或异常后不自动重发；`uncertain` / `sending` 需人工核对微信和控制台，尚无强制重发命令。
+- 超时或异常后不自动重发；`uncertain` / `sending` 需人工核对微信和日志，尚无强制重发命令。
 - 已占用推送名额会在调用模型前检查，减少重启后的重复开销；并发进程仍可能重复生成 AI 报告，但推送保留原子去重。
-- `accepted_by_serverchan` 只表示服务接受，未实现手机送达回执。
+- `accepted_by_ilink` 只表示微信接口接受，未实现手机送达回执。
 - 标题最多80字符、正文最多28000 UTF-8字节；超长拒绝发送，不自动截断。
 
 ## 验证

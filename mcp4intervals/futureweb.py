@@ -95,7 +95,7 @@ async def send_daily_coach_report(
     report: Annotated[str, Field(description="Complete report body to send to the owner's configured WeChat")],
     report_date: ReportDate,
 ) -> str:
-    """Use after the owner authorizes sending the complete coach report to their configured WeChat via ServerChan. Accepts only today's date in REPORT_TIMEZONE. At most one coach push attempt per day; an uncertain result requires manual review. Provider acceptance does not confirm handset delivery. Single-user mode only."""
+    """Use after the owner authorizes sending the complete coach report to their configured WeChat bot (iLink). Accepts only today's date in REPORT_TIMEZONE. At most one coach push attempt per day; an uncertain result requires manual review. Provider acceptance does not confirm handset delivery. Single-user mode only."""
     try:
         cfg = owner_config()
         result = await asyncio.to_thread(send_coach_report, cfg, report, report_date)

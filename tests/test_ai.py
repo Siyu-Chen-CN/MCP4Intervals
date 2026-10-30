@@ -111,7 +111,7 @@ class WorkflowTests(unittest.TestCase):
         push.assert_not_called()
 
     def test_report_mode_env_and_daily_delivery(self):
-        with patch.dict(os.environ, {"REPORT_MODE": "ai"}, clear=True), patch.object(Config, "today", return_value=DAY), patch("mcp4intervals.__main__.delivery_status", return_value=None), patch("mcp4intervals.__main__.fetch_snapshot", return_value=SNAPSHOT), patch("mcp4intervals.ai.analyze_snapshot", return_value="AI报告") as model, patch("mcp4intervals.__main__.deliver", return_value={"status": "accepted_by_serverchan"}) as push:
+        with patch.dict(os.environ, {"REPORT_MODE": "ai"}, clear=True), patch.object(Config, "today", return_value=DAY), patch("mcp4intervals.__main__.delivery_status", return_value=None), patch("mcp4intervals.__main__.fetch_snapshot", return_value=SNAPSHOT), patch("mcp4intervals.ai.analyze_snapshot", return_value="AI报告") as model, patch("mcp4intervals.__main__.deliver", return_value={"status": "accepted_by_ilink"}) as push:
             self.assertEqual(0, self.invoke(["send"]))
         model.assert_called_once()
         self.assertEqual("AI报告", push.call_args.args[3])
@@ -136,7 +136,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_uncertain_delivery_blocks_model_and_status_does_not_create_db(self):
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = Config(sendkey="SCTexample", state_dir=Path(tmp))
+            cfg = Config(ilink_user_id="owner@im.wechat", state_dir=Path(tmp))
             self.assertIsNone(delivery_status(cfg, DAY))
             self.assertFalse((Path(tmp) / "deliveries.sqlite3").exists())
             with self.assertRaises(AppError):

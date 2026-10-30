@@ -26,7 +26,7 @@ def run(cfg: Config):
     @mcp.tool()
     def send_daily_coach_report(report: str, report_date: str) -> dict:
         """External write: send the complete Chinese coach report to the owner's
-        configured WeChat via ServerChan. Only use after the owner authorized
+        configured WeChat bot (iLink). Only use after the owner authorized
         report delivery. report_date is YYYY-MM-DD in Europe/Amsterdam.
         No recipient or secret is accepted as a tool argument. One report/day.
         Never claim handset delivery merely because the provider accepted it.
