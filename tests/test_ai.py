@@ -4,15 +4,15 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 
 from mcp4intervals.__main__ import main
-from mcp4intervals.ai import ModelConfig, ModelError, analyze_snapshot
-from mcp4intervals.core import AppError, Config, deliver, delivery_status
+from mcp4intervals.ai import ModelConfig, ModelError, _parse_workout, analyze_snapshot, chat_reply
+from mcp4intervals.core import AppError, Config, build_ai_coach_event, create_event, deliver, delivery_status
 
 
 DAY = date(2026, 10, 30)
@@ -96,6 +96,43 @@ class AnalysisTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_parse_workout_marker(self):
+        text, workout = _parse_workout('建议轻松骑。\n<<<WORKOUT>>>\n{"workout": {"name": "恢复骑", "date": "2026-10-31"}}\n<<<END>>>')
+        self.assertEqual("建议轻松骑。", text)
+        self.assertEqual("恢复骑", workout["name"])
+
+    def test_parse_workout_no_marker(self):
+        text, workout = _parse_workout("没有课程，只是建议。")
+        self.assertEqual("没有课程，只是建议。", text)
+        self.assertIsNone(workout)
+
+    def test_chat_reply_returns_answer_and_workout(self):
+        content = '今天建议休息。\n<<<WORKOUT>>>\n{"workout": {"name": "轻松骑", "date": "2026-10-31", "moving_time": 3600}}\n<<<END>>>'
+        response = {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
+        with patch("mcp4intervals.ai.request_json", return_value=response):
+            answer, workout = chat_reply(SNAPSHOT, "安排明天", DAY, self.cfg)
+        self.assertIn("今天建议休息", answer)
+        self.assertEqual("轻松骑", workout["name"])
+
+    def test_build_ai_coach_event(self):
+        event = build_ai_coach_event({"name": "恢复骑", "date": "2026-10-31", "moving_time": 3600, "description": "Z2"}, DAY)
+        self.assertTrue(event["name"].startswith("AI Coach"))
+        self.assertEqual("2026-10-31T00:00:00", event["start_date_local"])
+        self.assertEqual("WORKOUT", event["category"])
+        self.assertEqual(3600, event["moving_time"])
+        event2 = build_ai_coach_event({"name": "x", "date": "bad"}, DAY)
+        self.assertEqual((DAY + timedelta(days=1)).isoformat() + "T00:00:00", event2["start_date_local"])
+
+    def test_create_event_posts_payload(self):
+        cfg = Config(api_key="ik", athlete_id="i1")
+        with patch("mcp4intervals.core.request_json", return_value={"id": 123}) as req:
+            result = create_event(cfg, {"name": "AI Coach: x"})
+        self.assertEqual({"id": 123}, result)
+        args, kwargs = req.call_args
+        self.assertEqual("https://intervals.icu/api/v1/athlete/i1/events", args[0])
+        payload = json.loads(kwargs["data"])
+        self.assertEqual("AI Coach: x", payload["name"])
 
 
 class WorkflowTests(unittest.TestCase):

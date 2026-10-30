@@ -203,6 +203,10 @@ PAGE = """<!doctype html>
         </tbody>
       </table>
       <p class="hint" style="margin-top:6px">Base URL 填根地址即可，程序会自动补 <code>/chat/completions</code>（也可以填完整地址）；模型名以各平台当前列表为准。调用模型会产生费用，请留意各平台的额度与充值。</p>
+      <div style="margin-top:8px">
+        <b>DeepSeek API Key 在哪拿：</b>登录 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com/api_keys ↗</a> 创建。
+        <img src="static/guide-deepseek.png" alt="DeepSeek 控制台 API Key 界面" style="width:100%;height:auto;display:block;border:1px solid #e5e7eb;border-radius:6px;margin-top:6px">
+      </div>
     </div>
   </details>
   <label>模型厂商</label>

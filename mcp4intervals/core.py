@@ -138,6 +138,48 @@ def fetch_snapshot(cfg: Config, day: date) -> dict:
     }
 
 
+def build_ai_coach_event(workout: dict, day: date) -> dict:
+    """Normalize a model-proposed workout into an Intervals.icu event.
+
+    The title is always prefixed with "AI Coach"; the date defaults to
+    tomorrow and the sport to Ride. Only fields Intervals accepts are sent.
+    """
+    name = str(workout.get("name") or "训练计划").strip() or "训练计划"
+    if not name.lower().startswith("ai coach"):
+        name = "AI Coach: " + name
+    raw_date = str(workout.get("date") or "").strip()
+    try:
+        event_date = date.fromisoformat(raw_date)
+    except ValueError:
+        event_date = day + timedelta(days=1)
+    event = {
+        "category": "WORKOUT",
+        "type": str(workout.get("type") or "Ride").strip() or "Ride",
+        "name": name[:80],
+        "start_date_local": event_date.isoformat() + "T00:00:00",
+        "description": str(workout.get("description") or "").strip(),
+    }
+    moving_time = workout.get("moving_time")
+    if isinstance(moving_time, int) and not isinstance(moving_time, bool) and 0 < moving_time <= 24 * 3600:
+        event["moving_time"] = moving_time
+    return event
+
+
+def create_event(cfg: Config, event: dict) -> dict:
+    """Create one calendar event (course/workout) on Intervals.icu."""
+    if not cfg.api_key or cfg.api_key.startswith("replace_"):
+        raise AppError("请先填写 INTERVALS_API_KEY。")
+    basic = base64.b64encode(f"API_KEY:{cfg.api_key}".encode()).decode()
+    headers = {"Authorization": f"Basic {basic}", "Accept": "application/json",
+               "Content-Type": "application/json"}
+    url = f"https://intervals.icu/api/v1/athlete/{cfg.athlete_id}/events"
+    result = request_json(url, data=json.dumps(event, ensure_ascii=False).encode("utf-8"),
+                          headers=headers)
+    if not isinstance(result, dict):
+        raise AppError("Intervals.icu 创建课程返回格式不符合预期。")
+    return result
+
+
 def number(value):
     if isinstance(value, bool):
         return None

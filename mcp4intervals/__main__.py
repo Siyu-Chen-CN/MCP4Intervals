@@ -10,9 +10,10 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .ai import ModelError
-from .core import (ROOT, AppError, Config, ContextExpired, deliver, delivery_status, fetch_snapshot,
-                   load_env, render_report, run_report, scheduled_tick)
+from .ai import ModelError, chat_reply
+from .core import (ROOT, AppError, Config, ContextExpired, build_ai_coach_event, create_event,
+                   deliver, delivery_status, fetch_snapshot, load_env, render_report, run_report,
+                   scheduled_tick)
 from .ilink import ILinkClient, ILinkError
 from .users import UserStore, canonical_athlete, default_users_db, users_from_json
 
@@ -51,8 +52,18 @@ def handle_user(args) -> int:
     raise AppError("未知的用户子命令。")
 
 
-def _poll_user(store: UserStore, user) -> str | None:
-    """Poll one user's bot for inbound messages; return a newly seen context_token."""
+def _msg_text(msg: dict) -> str:
+    """Text content of a text message (item_list text_item), or empty."""
+    for item in msg.get("item_list") or []:
+        if isinstance(item, dict) and item.get("type") == 1:
+            text = (item.get("text_item") or {}).get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    return ""
+
+
+def _poll_user(store: UserStore, user) -> dict:
+    """Poll one user's bot; return {"texts": [...], "context": str|None}."""
     state = store.get_ilink_state(user.athlete_id)
     client = ILinkClient(base_url=user.base_url, token=user.bot_token)
     try:
@@ -60,9 +71,10 @@ def _poll_user(store: UserStore, user) -> str | None:
     except ILinkError as exc:
         if exc.code == -14:
             print(f"微信会话已失效（{user.athlete_id}），需要重新扫码绑定。", file=sys.stderr, flush=True)
-        return None
+        return {"texts": [], "context": None}
     store.set_ilink_state(user.athlete_id, cursor=updates["cursor"])
     context = None
+    texts = []
     for msg in updates["msgs"]:
         if msg.get("from_user_id") != user.ilink_user_id:
             continue
@@ -71,9 +83,49 @@ def _poll_user(store: UserStore, user) -> str | None:
         token = msg.get("context_token")
         if token:
             context = token
+        text = _msg_text(msg)
+        if text:
+            texts.append(text)
     if context:
         store.set_ilink_state(user.athlete_id, context_token=context)
-    return context
+    return {"texts": texts, "context": context}
+
+
+def _reply_text(cfg: Config, text: str) -> None:
+    client = ILinkClient(base_url=cfg.base_url, token=cfg.bot_token)
+    try:
+        client.send_text(cfg.ilink_user_id, cfg.context_token, text)
+    except ILinkError as exc:
+        print(f"回复失败（{cfg.athlete_id}）：{exc}", file=sys.stderr, flush=True)
+
+
+def _handle_chat(store: UserStore, user, state_dir: Path, text: str) -> None:
+    """Answer one inbound WeChat message with the athlete's model; optionally create a course."""
+    if user.model is None:
+        return
+    context = store.get_ilink_state(user.athlete_id)["context_token"]
+    if not context:
+        return
+    cfg = replace(user.to_config(state_dir), context_token=context)
+    day = cfg.today()
+    try:
+        snapshot = fetch_snapshot(cfg, day)
+    except AppError as exc:
+        _reply_text(cfg, f"拉取训练数据失败：{exc}")
+        return
+    try:
+        answer, workout = chat_reply(snapshot, text, day, user.model)
+    except ModelError as exc:
+        _reply_text(cfg, f"模型调用失败：{exc}")
+        return
+    if workout:
+        try:
+            event = build_ai_coach_event(workout, day)
+            create_event(cfg, event)
+            answer += f"\n\n✅ 已在 Intervals 创建课程「{event['name']}」（{event['start_date_local'][:10]}）。"
+        except AppError as exc:
+            answer += f"\n\n⚠️ 创建课程失败：{exc}"
+    _reply_text(cfg, answer)
 
 
 def _send_for_user(store: UserStore, user, state_dir: Path, mode: str | None, handled: dict) -> None:
@@ -119,16 +171,18 @@ def run_multidaemon(store: UserStore, state_dir: Path, mode: str | None = None) 
     inbound message refreshes the context.
     """
     handled: dict[str, date] = {}
-    print("多用户日报进程就绪：定时推送 + 微信轮询；用户需先给机器人发一条消息。", flush=True)
+    print("多用户日报进程就绪：定时推送 + 微信轮询 + AI 教练问答；用户需先给机器人发一条消息。", flush=True)
     last_tick = 0.0
     while True:
         users = [u for u in store.all() if u.enabled and u.wechat_bound]
         for user in users:
             try:
-                new_context = _poll_user(store, user)
+                inbound = _poll_user(store, user)
             except Exception:
                 continue
-            if new_context:
+            for text in inbound["texts"]:
+                _handle_chat(store, user, state_dir, text)
+            if inbound["context"]:
                 _send_for_user(store, user, state_dir, mode, handled)
         now = time.time()
         if now - last_tick >= 60:
