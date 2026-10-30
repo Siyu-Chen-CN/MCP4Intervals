@@ -62,15 +62,28 @@ class WebTests(unittest.TestCase):
         self.assertIn("开通", body)
         self.assertNotIn("已开通用户", body)
 
-    def test_root_contains_intervals_guide(self):
+    def test_root_is_login_page(self):
         status, body = _request(self.port, "GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn("登录", body)
+        self.assertIn("去开通", body)
+
+    def test_register_contains_intervals_guide(self):
+        status, body = _request(self.port, "GET", "/register")
         self.assertEqual(200, status)
         self.assertIn("准备 Intervals 凭据", body)
         self.assertIn("static/guide-intervals.png", body)
+        self.assertIn("static/guide-deepseek.png", body)
         self.assertIn("https://intervals.icu/settings", body)
 
+    def test_dashboard_page(self):
+        status, body = _request(self.port, "GET", "/dashboard")
+        self.assertEqual(200, status)
+        self.assertIn("我的配置", body)
+        self.assertIn("编辑设置", body)
+
     def test_static_guide_images_served(self):
-        for name in ("guide-intervals.png",):
+        for name in ("guide-intervals.png", "guide-deepseek.png"):
             req = Request(f"http://127.0.0.1:{self.port}/static/{name}", method="GET")
             with urlopen(req, timeout=5) as resp:
                 self.assertEqual(200, resp.status)

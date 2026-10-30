@@ -87,6 +87,7 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <h1>MCP4Intervals · 每日骑行日报开通</h1>
+<p class="hint" style="margin-top:-6px"><a href="__BASE__">已有账号？去登录 →</a></p>
 
 <div class="step">
   <b>第 1 步 · 绑定微信（必须）</b>：点「生成二维码」，用微信扫码并确认登录。
@@ -616,6 +617,62 @@ loadUsers();
 """
 
 
+LOGIN_PAGE = """<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<base href="__BASE__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP4Intervals · 登录</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; max-width: 420px; margin: 0 auto; padding: 30px 20px; color: #1f2937; }
+  h1 { font-size: 21px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin: 14px 0; background: #fff; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+  input { width: 100%; padding: 9px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  button { width: 100%; background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 10px; font-size: 14px; cursor: pointer; margin-top: 14px; }
+  a { color: #2563eb; }
+  #msg { padding: 10px; border-radius: 6px; margin: 10px 0; display: none; }
+  #msg.ok { display: block; background: #dcfce7; color: #166534; }
+  #msg.err { display: block; background: #fee2e2; color: #991b1b; }
+  .hint { color: #6b7280; font-size: 13px; margin-top: 14px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>MCP4Intervals · 登录</h1>
+<div class="card">
+  <label>运动员 ID（如 i123456）</label>
+  <input id="athlete_id" placeholder="i123456">
+  <label>管理密码</label>
+  <input id="secret" type="password" autocomplete="off">
+  <button onclick="login()">登录</button>
+  <div id="msg"></div>
+</div>
+<p class="hint">还没有账号？<a href="register">去开通 →</a></p>
+<script>
+function el(id) { return document.getElementById(id); }
+function showMsg(text, ok) { var m = el('msg'); m.textContent = text; m.className = ok ? 'ok' : 'err'; }
+function login() {
+  var id = el('athlete_id').value.trim();
+  var secret = el('secret').value.trim();
+  if (!id) { showMsg('请填写运动员 ID', false); return; }
+  if (!secret) { showMsg('请输入管理密码', false); return; }
+  fetch('api/user/' + encodeURIComponent(id) + '/load', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manage_secret: secret }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(res){
+      if (!res.ok) { showMsg(res.d.message || '登录失败', false); return; }
+      sessionStorage.setItem('athlete_id', res.d.athlete_id);
+      sessionStorage.setItem('manage_secret', secret);
+      location.href = 'dashboard';
+    })
+    .catch(function(){ showMsg('请求失败', false); });
+}
+</script>
+</body>
+</html>
+"""
+
+
 DASHBOARD_PAGE = """<!doctype html>
 <html lang="zh">
 <head>
@@ -653,19 +710,7 @@ DASHBOARD_PAGE = """<!doctype html>
 </head>
 <body>
 <h1>MCP4Intervals · 我的配置</h1>
-<p class="hint" style="margin-top:-6px"><a href="__BASE__">← 返回开通页</a></p>
-
-<div class="card">
-  <h2 style="margin-top:0">登录</h2>
-  <label>运动员 ID（如 i123456）</label>
-  <input id="login_athlete_id" placeholder="i123456">
-  <label>管理密码</label>
-  <input id="login_secret" type="password" autocomplete="off">
-  <div style="margin-top:12px">
-    <button onclick="loadMine()">载入我的配置</button>
-  </div>
-  <div id="msg"></div>
-</div>
+<p class="hint" style="margin-top:-6px"><a href="__BASE__" onclick="logout()">← 退出登录</a> · <a href="register">去开通页</a></p>
 
 <div id="dash" style="display:none">
   <div class="card" style="border-color:#10b981;background:#f0fdf4">
@@ -748,7 +793,7 @@ DASHBOARD_PAGE = """<!doctype html>
       <button onclick="save()">保存</button>
     </div>
     <div class="hint">留空的密钥字段在修改时会保留原值；管理密码请务必牢记。</div>
-    <div id="msg2"></div>
+    <div id="msg"></div>
   </div>
 </div>
 
@@ -850,8 +895,8 @@ function setTimezone(value) {
   sel.value = v;
 }
 
-var editingId = '';
-var manageSecret = '';
+var editingId = sessionStorage.getItem('athlete_id') || '';
+var manageSecret = sessionStorage.getItem('manage_secret') || '';
 
 function showModal(title, bodyHtml) {
   el('modalTitle').textContent = title;
@@ -915,24 +960,23 @@ function applyConfig(d) {
   fillFrom(d);
 }
 
-function loadMine() {
-  var id = el('login_athlete_id').value.trim();
-  var secret = el('login_secret').value.trim();
-  if (!id) { showMsg('请先填写运动员 ID', false); return; }
-  if (!secret) { showMsg('请输入管理密码', false); return; }
-  fetch('api/user/' + encodeURIComponent(id) + '/load', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manage_secret: secret }) })
+function loadConfig() {
+  if (!editingId || !manageSecret) { location.href = '__BASE__'; return; }
+  fetch('api/user/' + encodeURIComponent(editingId) + '/load', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manage_secret: manageSecret }) })
     .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
     .then(function(res){
-      if (!res.ok) { showMsg(res.d.message || '载入失败', false); return; }
-      editingId = res.d.athlete_id;
-      manageSecret = secret;
+      if (!res.ok) { location.href = '__BASE__'; return; }
       applyConfig(res.d);
       el('dash').style.display = 'block';
-      el('dash').scrollIntoView({ behavior: 'smooth' });
-      showMsg('', false);
     })
-    .catch(function(){ showMsg('请求失败', false); });
+    .catch(function(){ showMsg('载入失败，请重试或重新登录', false); });
 }
+function logout() {
+  sessionStorage.removeItem('athlete_id');
+  sessionStorage.removeItem('manage_secret');
+}
+
+loadConfig();
 
 function save() {
   if (!editingId) { showMsg('请先登录载入配置', false); return; }
@@ -1140,10 +1184,12 @@ def make_handler(bound_store: UserStore):
             elif path == "/admin":
                 page = ADMIN_PAGE if _is_admin(self) else ADMIN_LOGIN
                 self._respond(200, page.replace("__BASE__", web_base()), "text/html; charset=utf-8")
+            elif path == "/register":
+                self._respond(200, PAGE.replace("__BASE__", web_base()).replace("__MAX_USERS__", str(max_users())), "text/html; charset=utf-8")
             elif path == "/dashboard":
                 self._respond(200, DASHBOARD_PAGE.replace("__BASE__", web_base()), "text/html; charset=utf-8")
             elif path in ("/", ""):
-                self._respond(200, PAGE.replace("__BASE__", web_base()).replace("__MAX_USERS__", str(max_users())), "text/html; charset=utf-8")
+                self._respond(200, LOGIN_PAGE.replace("__BASE__", web_base()), "text/html; charset=utf-8")
             elif path.startswith("/static/"):
                 self._serve_static(path[len("/static/"):])
             else:
