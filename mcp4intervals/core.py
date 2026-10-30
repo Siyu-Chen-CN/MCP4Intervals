@@ -98,9 +98,19 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+_DEFAULT_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+    "Accept": "application/json",
+}
+
+
 def request_json(url: str, *, data: bytes | None = None, headers=None, timeout=30):
+    merged = dict(_DEFAULT_HEADERS)
+    if headers:
+        merged.update(headers)
     request = urllib.request.Request(
-        url, data=data, headers=headers or {}, method="POST" if data is not None else "GET"
+        url, data=data, headers=merged, method="POST" if data is not None else "GET"
     )
     try:
         opener = urllib.request.build_opener(NoRedirect())

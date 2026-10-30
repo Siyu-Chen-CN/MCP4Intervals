@@ -121,14 +121,6 @@ PAGE = """<!doctype html>
   </ol>
 </div>
 
-<div id="dashboard" class="card" style="display:none;border-color:#10b981;background:#f0fdf4">
-  <h2 style="margin-top:0">我的配置（Dashboard）</h2>
-  <div id="dashBody" class="dash-grid"></div>
-  <div style="margin-top:12px">
-    <button class="secondary" onclick="document.getElementById('formTitle').scrollIntoView({behavior:'smooth'})">↓ 编辑设置</button>
-  </div>
-</div>
-
 <div class="card">
   <h2 id="formTitle">开通 / 修改我的配置</h2>
   <label>Intervals 运动员 ID（如 i123456 或 123456）<a href="#intervals-guide" class="label-help" onclick="document.getElementById('intervals-guide').scrollIntoView({behavior:'smooth'});return false;">怎么找？</a></label>
@@ -371,20 +363,6 @@ function showModal(title, bodyHtml) {
 function closeModal() {
   el('modalOverlay').style.display = 'none';
 }
-function renderDashboard(u) {
-  var h = '';
-  function row(k, v, safe) { h += '<div class="k">' + esc(k) + '</div><div class="v">' + (safe ? v : esc(v)) + '</div>'; }
-  row('运动员 ID', u.athlete_id);
-  row('微信绑定', u.wechat_bound ? '✅ 已绑定' : '❌ 未绑定', true);
-  row('时区', u.timezone);
-  row('每日发送时间', u.send_at);
-  row('报告类型', u.report_mode === 'ai' ? 'AI 分析（调用模型）' : '规则摘要（不调用模型）', true);
-  row('Intervals API Key', u.intervals_api_key_set ? '✅ 已设置' : '⚠️ 未设置', true);
-  if (u.model_name) { row('模型', u.model_name + (u.model_api_key_set ? '' : '（未设 Key）')); }
-  else { row('模型', '未配置', true); }
-  el('dashBody').innerHTML = h;
-}
-
 function resetForm() {
   el('formTitle').textContent = '开通 / 修改我的配置';
   el('athlete_id').value = '';
@@ -407,7 +385,6 @@ function resetForm() {
   bindDone = false;
   el('bindBox').style.display = 'none';
   el('bindState').textContent = '微信状态：未绑定';
-  el('dashboard').style.display = 'none';
   showMsg('', false);
 }
 
@@ -458,9 +435,6 @@ function loadMine() {
       el('athlete_id').disabled = true;
       editingId = res.d.athlete_id;
       el('bindState').textContent = '微信状态：' + (res.d.wechat_bound ? '已绑定' : '未绑定');
-      renderDashboard(res.d);
-      el('dashboard').style.display = 'block';
-      el('dashboard').scrollIntoView({ behavior: 'smooth' });
       showMsg('已载入 ' + res.d.athlete_id + '，修改后点保存', true);
     })
     .catch(function(){ showMsg('请求失败', false); });
@@ -642,6 +616,361 @@ loadUsers();
 """
 
 
+DASHBOARD_PAGE = """<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<base href="__BASE__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP4Intervals · 我的配置</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; max-width: 760px; margin: 0 auto; padding: 20px; color: #1f2937; }
+  h1 { font-size: 21px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin: 14px 0; background: #fff; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+  input, select { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 9px 14px; font-size: 14px; cursor: pointer; }
+  button.secondary { background: #e5e7eb; color: #111; }
+  h3 { font-size: 15px; margin: 16px 0 4px; border-top: 1px dashed #e5e7eb; padding-top: 14px; }
+  .hint { color: #6b7280; font-size: 12px; margin-top: 4px; }
+  a { color: #2563eb; }
+  #msg { padding: 10px; border-radius: 6px; margin: 10px 0; display: none; }
+  #msg.ok { display: block; background: #dcfce7; color: #166534; }
+  #msg.err { display: block; background: #fee2e2; color: #991b1b; }
+  #modalOverlay { display: none; position: fixed; inset: 0; background: rgba(17,24,39,0.55); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+  .modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 440px; width: 100%; text-align: center; box-sizing: border-box; }
+  .modal .icon { font-size: 42px; }
+  .modal h2 { margin: 10px 0 6px; font-size: 19px; }
+  .modal p { color: #4b5563; font-size: 14px; line-height: 1.7; margin: 0; }
+  .modal button { margin-top: 16px; width: 100%; }
+  .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 13px; }
+  .dash-grid .k { color: #6b7280; }
+  .dash-grid .v { color: #111827; font-weight: 600; }
+  @media (max-width: 640px) { .dash-grid { grid-template-columns: 1fr; } .row { flex-direction: column; } }
+</style>
+</head>
+<body>
+<h1>MCP4Intervals · 我的配置</h1>
+<p class="hint" style="margin-top:-6px"><a href="__BASE__">← 返回开通页</a></p>
+
+<div class="card">
+  <h2 style="margin-top:0">登录</h2>
+  <label>运动员 ID（如 i123456）</label>
+  <input id="login_athlete_id" placeholder="i123456">
+  <label>管理密码</label>
+  <input id="login_secret" type="password" autocomplete="off">
+  <div style="margin-top:12px">
+    <button onclick="loadMine()">载入我的配置</button>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<div id="dash" style="display:none">
+  <div class="card" style="border-color:#10b981;background:#f0fdf4">
+    <h2 style="margin-top:0">当前设置</h2>
+    <div id="dashBody" class="dash-grid"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">编辑设置</h2>
+    <label>Intervals.icu API Key <a href="https://intervals.icu/settings" target="_blank" rel="noopener">去哪拿 ↗</a></label>
+    <input id="intervals_api_key" type="password" autocomplete="off">
+    <div class="row">
+      <div><label>时区</label>
+        <select id="timezone">
+          <optgroup label="中国">
+            <option value="Asia/Shanghai">Asia/Shanghai（UTC+08:00）</option>
+            <option value="Asia/Hong_Kong">Asia/Hong_Kong（UTC+08:00）</option>
+            <option value="Asia/Taipei">Asia/Taipei（UTC+08:00）</option>
+          </optgroup>
+          <optgroup label="欧洲">
+            <option value="Europe/Amsterdam">Europe/Amsterdam（UTC+01:00）</option>
+            <option value="Europe/London">Europe/London（UTC+00:00）</option>
+            <option value="Europe/Dublin">Europe/Dublin（UTC+00:00）</option>
+            <option value="Europe/Paris">Europe/Paris（UTC+01:00）</option>
+            <option value="Europe/Berlin">Europe/Berlin（UTC+01:00）</option>
+            <option value="Europe/Madrid">Europe/Madrid（UTC+01:00）</option>
+            <option value="Europe/Rome">Europe/Rome（UTC+01:00）</option>
+            <option value="Europe/Zurich">Europe/Zurich（UTC+01:00）</option>
+            <option value="Europe/Moscow">Europe/Moscow（UTC+03:00）</option>
+          </optgroup>
+          <optgroup label="北美">
+            <option value="America/New_York">America/New_York（UTC-05:00）</option>
+            <option value="America/Toronto">America/Toronto（UTC-05:00）</option>
+            <option value="America/Chicago">America/Chicago（UTC-06:00）</option>
+            <option value="America/Denver">America/Denver（UTC-07:00）</option>
+            <option value="America/Los_Angeles">America/Los_Angeles（UTC-08:00）</option>
+            <option value="America/Vancouver">America/Vancouver（UTC-08:00）</option>
+            <option value="America/Mexico_City">America/Mexico_City（UTC-06:00）</option>
+          </optgroup>
+          <optgroup label="亚太">
+            <option value="Asia/Tokyo">Asia/Tokyo（UTC+09:00）</option>
+            <option value="Asia/Seoul">Asia/Seoul（UTC+09:00）</option>
+            <option value="Asia/Singapore">Asia/Singapore（UTC+08:00）</option>
+            <option value="Asia/Bangkok">Asia/Bangkok（UTC+07:00）</option>
+            <option value="Asia/Dubai">Asia/Dubai（UTC+04:00）</option>
+            <option value="Asia/Kolkata">Asia/Kolkata（UTC+05:30）</option>
+            <option value="Australia/Sydney">Australia/Sydney（UTC+10:00）</option>
+            <option value="Australia/Melbourne">Australia/Melbourne（UTC+10:00）</option>
+            <option value="Australia/Perth">Australia/Perth（UTC+08:00）</option>
+            <option value="Pacific/Auckland">Pacific/Auckland（UTC+12:00）</option>
+          </optgroup>
+          <optgroup label="其他">
+            <option value="UTC">UTC（UTC+00:00）</option>
+          </optgroup>
+        </select>
+      </div>
+      <div><label>每日发送时间</label><input id="send_at" placeholder="HH:MM"></div>
+      <div><label>报告类型</label><select id="report_mode"><option value="ai">AI 分析</option><option value="summary">规则摘要</option></select></div>
+    </div>
+
+    <h3>模型 API（report_mode 选 AI 时必填）</h3>
+    <label>模型厂商</label>
+    <select id="provider" onchange="onProviderChange()">
+      <option value="">请选择模型厂商…</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="openai">OpenAI（ChatGPT）</option>
+      <option value="zhipu">智谱 AI（GLM）</option>
+      <option value="kimi">月之暗面（Kimi）</option>
+      <option value="__custom__">其他（自己填 Base URL）</option>
+    </select>
+    <label id="base_url_label" style="display:none">Base URL（接口地址）</label>
+    <input id="base_url" placeholder="https://…/v1" style="display:none">
+    <label>模型名</label>
+    <select id="model_select" style="display:none" onchange="onModelSelect()"></select>
+    <input id="model" placeholder="模型名（先选模型厂商）">
+    <label>模型 API Key</label>
+    <input id="model_api_key" type="password" autocomplete="off">
+
+    <div style="margin-top:16px">
+      <button onclick="save()">保存</button>
+    </div>
+    <div class="hint">留空的密钥字段在修改时会保留原值；管理密码请务必牢记。</div>
+    <div id="msg2"></div>
+  </div>
+</div>
+
+<div id="modalOverlay">
+  <div class="modal">
+    <div class="icon">✅</div>
+    <h2 id="modalTitle">配置已更新</h2>
+    <p id="modalBody"></p>
+    <button onclick="closeModal()">确定</button>
+  </div>
+</div>
+
+<script>
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function el(id) { return document.getElementById(id); }
+function showMsg(text, ok) { var m = el('msg'); m.textContent = text; m.className = ok ? 'ok' : 'err'; }
+
+var PROVIDERS = {
+  "deepseek": { name: "DeepSeek", base: "https://api.deepseek.com", models: ["deepseek-flash", "deepseek-v4-pro"] },
+  "openai": { name: "OpenAI（ChatGPT）", base: "https://api.openai.com/v1", models: ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2", "gpt-5.2-pro"] },
+  "zhipu": { name: "智谱 AI（GLM）", base: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4-plus", "glm-4-flash"] },
+  "kimi": { name: "月之暗面（Kimi）", base: "https://api.moonshot.cn/v1", models: ["kimi-k3.1-pro", "kimi-k3"] }
+};
+var CUSTOM_MODEL = "__custom__";
+
+function hostOf(url) {
+  try {
+    var u = new URL(url.indexOf("://") === -1 ? "https://" + url : url);
+    return u.hostname.toLowerCase();
+  } catch (e) { return ""; }
+}
+function providerKeyFor(url) {
+  var host = hostOf(url);
+  for (var k in PROVIDERS) {
+    if (hostOf(PROVIDERS[k].base) === host) return k;
+  }
+  return null;
+}
+function onProviderChange() {
+  var key = el('provider').value;
+  var p = PROVIDERS[key];
+  var baseInput = el('base_url');
+  var sel = el('model_select');
+  var input = el('model');
+  if (key === CUSTOM_MODEL) {
+    el('base_url_label').style.display = 'block';
+    baseInput.style.display = 'block';
+    baseInput.value = '';
+    sel.style.display = 'none';
+    input.style.display = 'block';
+  } else if (p) {
+    el('base_url_label').style.display = 'none';
+    baseInput.style.display = 'none';
+    baseInput.value = p.base;
+    sel.innerHTML = '';
+    p.models.forEach(function(m) {
+      var o = document.createElement('option');
+      o.value = m; o.textContent = m;
+      sel.appendChild(o);
+    });
+    var custom = document.createElement('option');
+    custom.value = CUSTOM_MODEL; custom.textContent = '其他（手动输入）';
+    sel.appendChild(custom);
+    sel.style.display = 'block';
+    input.style.display = 'none';
+  } else {
+    el('base_url_label').style.display = 'none';
+    baseInput.style.display = 'none';
+    baseInput.value = '';
+    sel.style.display = 'none';
+    input.style.display = 'block';
+  }
+}
+function onModelSelect() {
+  if (el('model_select').value === CUSTOM_MODEL) {
+    el('model_select').style.display = 'none';
+    el('model').style.display = 'block';
+    el('model').value = '';
+    el('model').focus();
+  }
+}
+function currentModelName() {
+  var sel = el('model_select');
+  if (sel.style.display !== 'none' && sel.value) return sel.value;
+  return el('model').value.trim();
+}
+function setTimezone(value) {
+  var sel = el('timezone');
+  var v = value || 'Europe/Amsterdam';
+  var found = false;
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === v) { found = true; break; }
+  }
+  if (!found) {
+    var o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  }
+  sel.value = v;
+}
+
+var editingId = '';
+var manageSecret = '';
+
+function showModal(title, bodyHtml) {
+  el('modalTitle').textContent = title;
+  el('modalBody').innerHTML = bodyHtml;
+  el('modalOverlay').style.display = 'flex';
+}
+function closeModal() { el('modalOverlay').style.display = 'none'; }
+
+function renderDashboard(u) {
+  var h = '';
+  function row(k, v, safe) { h += '<div class="k">' + esc(k) + '</div><div class="v">' + (safe ? v : esc(v)) + '</div>'; }
+  row('运动员 ID', u.athlete_id);
+  row('微信绑定', u.wechat_bound ? '✅ 已绑定' : '❌ 未绑定', true);
+  row('时区', u.timezone);
+  row('每日发送时间', u.send_at);
+  row('报告类型', u.report_mode === 'ai' ? 'AI 分析（调用模型）' : '规则摘要（不调用模型）', true);
+  row('Intervals API Key', u.intervals_api_key_set ? '✅ 已设置' : '⚠️ 未设置', true);
+  if (u.model_name) { row('模型', u.model_name + (u.model_api_key_set ? '' : '（未设 Key）')); }
+  else { row('模型', '未配置', true); }
+  el('dashBody').innerHTML = h;
+}
+
+function fillFrom(u) {
+  setTimezone(u.timezone);
+  el('send_at').value = u.send_at;
+  el('report_mode').value = u.report_mode;
+  el('intervals_api_key').value = '';
+  el('model_api_key').value = '';
+  var baseUrl = u.model_base_url || '';
+  var mname = u.model_name || '';
+  var key = baseUrl ? providerKeyFor(baseUrl) : null;
+  if (key) {
+    el('provider').value = key;
+    onProviderChange();
+    var sel = el('model_select');
+    if (mname) {
+      var found = false;
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === mname) { sel.value = mname; found = true; break; }
+      }
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = mname; o.textContent = mname;
+        sel.insertBefore(o, sel.options[sel.options.length - 1]);
+        sel.value = mname;
+      }
+    }
+  } else if (baseUrl || mname) {
+    el('provider').value = CUSTOM_MODEL;
+    onProviderChange();
+    el('base_url').value = baseUrl;
+    el('model').value = mname;
+  } else {
+    el('provider').value = '';
+    onProviderChange();
+  }
+}
+
+function applyConfig(d) {
+  renderDashboard(d);
+  fillFrom(d);
+}
+
+function loadMine() {
+  var id = el('login_athlete_id').value.trim();
+  var secret = el('login_secret').value.trim();
+  if (!id) { showMsg('请先填写运动员 ID', false); return; }
+  if (!secret) { showMsg('请输入管理密码', false); return; }
+  fetch('api/user/' + encodeURIComponent(id) + '/load', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manage_secret: secret }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(res){
+      if (!res.ok) { showMsg(res.d.message || '载入失败', false); return; }
+      editingId = res.d.athlete_id;
+      manageSecret = secret;
+      applyConfig(res.d);
+      el('dash').style.display = 'block';
+      el('dash').scrollIntoView({ behavior: 'smooth' });
+      showMsg('', false);
+    })
+    .catch(function(){ showMsg('请求失败', false); });
+}
+
+function save() {
+  if (!editingId) { showMsg('请先登录载入配置', false); return; }
+  var body = {
+    athlete_id: editingId,
+    manage_secret: manageSecret,
+    intervals_api_key: el('intervals_api_key').value.trim(),
+    timezone: el('timezone').value.trim(),
+    send_at: el('send_at').value.trim(),
+    report_mode: el('report_mode').value
+  };
+  var base = el('base_url').value.trim();
+  var model = currentModelName();
+  if (base || model) {
+    body.model = {
+      base_url: base,
+      model: model,
+      api_key: el('model_api_key').value.trim()
+    };
+  }
+  fetch('api/user', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(res){
+      if (!res.ok) { showMsg(res.d.message || '保存失败', false); return; }
+      showModal('✅ 配置已更新', '你的设置已保存。');
+      fetch('api/user/' + encodeURIComponent(editingId) + '/load', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manage_secret: manageSecret }) })
+        .then(function(r2){ return r2.json(); })
+        .then(function(d2){ applyConfig(d2); })
+        .catch(function(){});
+    })
+    .catch(function(){ showMsg('请求失败', false); });
+}
+</script>
+</body>
+</html>
+"""
+
+
 def configured_token() -> str:
     return os.getenv("ONBOARD_ADMIN_TOKEN", "").strip()
 
@@ -811,6 +1140,8 @@ def make_handler(bound_store: UserStore):
             elif path == "/admin":
                 page = ADMIN_PAGE if _is_admin(self) else ADMIN_LOGIN
                 self._respond(200, page.replace("__BASE__", web_base()), "text/html; charset=utf-8")
+            elif path == "/dashboard":
+                self._respond(200, DASHBOARD_PAGE.replace("__BASE__", web_base()), "text/html; charset=utf-8")
             elif path in ("/", ""):
                 self._respond(200, PAGE.replace("__BASE__", web_base()).replace("__MAX_USERS__", str(max_users())), "text/html; charset=utf-8")
             elif path.startswith("/static/"):
